@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Multi-Vendor Food Ordering System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-page="login">
+  <header class="topbar">
+    <a class="brand" href="../customer/scan.html" aria-label="Food ordering scan page">
+      <span class="brand-mark">FO</span>
+      <span>
+        <strong>FoodOrder</strong>
+        <small>Staff and admin access</small>
+      </span>
+    </a>
+
+    <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-label="Open navigation">
+      <i data-lucide="menu"></i>
+    </button>
+
+    <nav class="nav-links" data-nav>
+      <a href="../customer/scan.html" data-nav-item="scan">Scan</a>
+      <a href="login.html" data-nav-item="login">Login</a>
+    </nav>
+
+    <div class="top-actions"></div>
+  </header>
+
+  <main class="page-shell narrow">
+    <section class="screen-header compact">
+      <div>
+        <p class="eyebrow">Login</p>
+        <h1>Access staff or admin tools</h1>
+        <p>Food stall owners can edit stall food and order status. Admin users can manage stalls, accounts, QR links, and system activity.</p>
+      </div>
+    </section>
+
+    <section class="login-layout">
+      <form class="content-panel form-panel" id="login-form">
+        <div class="form-grid">
+          <label>
+            <span>Role</span>
+            <select name="role" required>
+              <option value="staff">Food stall owner</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label>
+            <span>Username or email</span>
+            <input type="text" name="username" required placeholder="staff">
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" name="password" required placeholder="Password">
+          </label>
+        </div>
+
+        <button class="button full" type="submit">
+          <i data-lucide="log-in"></i>
+          Login
+        </button>
+      </form>
+
+      <aside class="content-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Account access</p>
+            <h2>Use assigned login details</h2>
+          </div>
+        </div>
+        <div class="mini-list">
+          <article class="mini-row">
+            <div class="mini-row-top">
+              <div>
+                <h3>Food stall owner</h3>
+                <p>Sign in with the staff account created by an admin.</p>
+              </div>
+              <span class="tag teal">Staff</span>
+            </div>
+          </article>
+          <article class="mini-row">
+            <div class="mini-row-top">
+              <div>
+                <h3>Admin</h3>
+                <p>Use the private admin account for stall, table, and order management.</p>
+              </div>
+              <span class="tag teal">Admin</span>
+            </div>
+          </article>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Multi-Vendor Food Ordering System</span>
+  </footer>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script defer src="../js/shared/config.js"></script>
+  <script defer src="../js/shared/data.js"></script>
+  <script defer src="../js/shared/supabase.js"></script>
+  <script defer src="../js/shared/app.js"></script>
+  <script defer src="../js/shared/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orders | Multi-Vendor Food Ordering System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-page="orders" data-requires-order-access>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Food ordering home">
+      <span class="brand-mark">FO</span>
+      <span>
+        <strong>FoodOrder</strong>
+        <small>Multi-vendor food court</small>
+      </span>
+    </a>
+    <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-label="Open navigation">
+      <i data-lucide="menu"></i>
+    </button>
+    <nav class="nav-links" data-nav>
+      <a class="pre-order-only" href="scan.html" data-nav-item="scan">Scan</a>
+      <a class="pre-order-only" href="../main/login.html?role=staff" data-nav-item="staff">Staff</a>
+      <a class="pre-order-only" href="../main/login.html?role=admin" data-nav-item="admin">Admin</a>
+      <a class="order-only" href="index.html" data-nav-item="menu">Order</a>
+      <a class="order-only" href="cart.html" data-nav-item="cart">Cart</a>
+      <a class="order-only" href="orders.html" data-nav-item="orders">Orders</a>
+    </nav>
+    <div class="top-actions order-only">
+      <a class="mode-badge table-chip" href="scan.html" data-table-chip>Please scan a table</a>
+      <a class="cart-chip" href="cart.html" aria-label="Open cart">
+        <i data-lucide="shopping-cart"></i>
+        <span data-cart-count>0</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="page-shell narrow">
+    <section class="screen-header compact">
+      <div>
+        <p class="eyebrow">Order tracking</p>
+        <h1>Track food preparation status</h1>
+        <p>Customers can check whether an order is pending, preparing, ready, or completed.</p>
+      </div>
+    </section>
+
+    <section class="content-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Customer orders</p>
+          <h2>Recent orders</h2>
+        </div>
+        <div class="tab-row" role="tablist" aria-label="Filter orders">
+          <button class="tab active" type="button" data-order-filter="all">All</button>
+          <button class="tab" type="button" data-order-filter="Pending">Pending</button>
+          <button class="tab" type="button" data-order-filter="Preparing">Received</button>
+          <button class="tab" type="button" data-order-filter="Completed">Completed</button>
+          <button class="tab" type="button" data-order-filter="Cancelled">Cancelled</button>
+        </div>
+      </div>
+      <div class="order-list" id="order-list"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Multi-Vendor Food Ordering System</span>
+  </footer>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script defer src="../js/shared/config.js"></script>
+  <script defer src="../js/shared/data.js"></script>
+  <script defer src="../js/shared/supabase.js"></script>
+  <script defer src="../js/shared/app.js"></script>
+  <script defer src="../js/customer/orders.js"></script>
+</body>
+</html>

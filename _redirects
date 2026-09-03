@@ -1,0 +1,11 @@
+/.env         /404.html  404!
+/.env.*       /404.html  404!
+/.gitignore   /404.html  404!
+/README.md      /404.html  404!
+/supabase/*     /404.html  404!
+/scripts/*      /404.html  404!
+/netlify.toml   /404.html  404!
+/scan.html      /customer/scan.html  302
+/login.html     /main/login.html     302
+/staff.html     /stall/index.html    302
+/admin.html     /admin/index.html    302

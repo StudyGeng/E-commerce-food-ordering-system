@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout | Multi-Vendor Food Ordering System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-page="checkout" data-requires-order-access>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Food ordering home">
+      <span class="brand-mark">FO</span>
+      <span>
+        <strong>FoodOrder</strong>
+        <small>Multi-vendor food court</small>
+      </span>
+    </a>
+    <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-label="Open navigation">
+      <i data-lucide="menu"></i>
+    </button>
+    <nav class="nav-links" data-nav>
+      <a class="pre-order-only" href="scan.html" data-nav-item="scan">Scan</a>
+      <a class="pre-order-only" href="../main/login.html?role=staff" data-nav-item="staff">Staff</a>
+      <a class="pre-order-only" href="../main/login.html?role=admin" data-nav-item="admin">Admin</a>
+      <a class="order-only" href="index.html" data-nav-item="menu">Order</a>
+      <a class="order-only" href="cart.html" data-nav-item="cart">Cart</a>
+      <a class="order-only" href="orders.html" data-nav-item="orders">Orders</a>
+    </nav>
+    <div class="top-actions order-only">
+      <a class="mode-badge table-chip" href="scan.html" data-table-chip>Please scan a table</a>
+      <a class="cart-chip" href="cart.html" aria-label="Open cart">
+        <i data-lucide="shopping-cart"></i>
+        <span data-cart-count>0</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="page-shell narrow">
+    <section class="screen-header compact">
+      <div>
+        <p class="eyebrow">Checkout</p>
+        <h1>Confirm order and payment</h1>
+        <p>Choose card, e-wallet, or counter payment before sending the order to the stall.</p>
+      </div>
+    </section>
+
+    <section class="checkout-layout">
+      <form class="content-panel form-panel" id="checkout-form">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Payment</p>
+            <h2>Choose how to pay</h2>
+          </div>
+        </div>
+
+        <div class="checkout-table-card">
+          <span>Scanned table</span>
+          <strong data-checkout-table>Please scan a table</strong>
+        </div>
+
+        <div class="payment-options" role="radiogroup" aria-label="Payment method">
+          <label>
+            <input type="radio" name="payment_method" value="Sandbox Card" checked>
+            <span><i data-lucide="credit-card"></i> Card</span>
+          </label>
+          <label>
+            <input type="radio" name="payment_method" value="Sandbox Wallet">
+            <span><i data-lucide="wallet"></i> E-wallet</span>
+          </label>
+          <label>
+            <input type="radio" name="payment_method" value="Pay at Counter">
+            <span><i data-lucide="banknote"></i> Pay at counter</span>
+          </label>
+        </div>
+
+        <p class="muted payment-note" id="payment-note">Card payment opens a secure demo confirmation before the order is sent.</p>
+
+        <button class="button full" type="submit" id="place-order-button">
+          <i data-lucide="credit-card"></i>
+          Pay by card
+        </button>
+      </form>
+
+      <aside id="checkout-summary" class="summary-panel"></aside>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Multi-Vendor Food Ordering System</span>
+  </footer>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script defer src="../js/shared/config.js"></script>
+  <script defer src="../js/shared/data.js"></script>
+  <script defer src="../js/shared/supabase.js"></script>
+  <script defer src="../js/shared/app.js"></script>
+  <script defer src="../js/customer/checkout.js"></script>
+</body>
+</html>

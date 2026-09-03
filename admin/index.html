@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard | Multi-Vendor Food Ordering System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-page="admin" data-requires-role="admin">
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Admin dashboard">
+      <span class="brand-mark">FO</span>
+      <span>
+        <strong>FoodOrder</strong>
+        <small>Admin management</small>
+      </span>
+    </a>
+    <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-label="Open navigation">
+      <i data-lucide="menu"></i>
+    </button>
+    <nav class="nav-links" data-nav>
+      <a class="public-only" href="../main/login.html?role=admin" data-nav-item="login">Login</a>
+      <a class="session-only" href="../main/login.html?role=staff" data-nav-item="staff">Staff</a>
+      <a class="session-only" href="index.html" data-nav-item="admin">Admin</a>
+    </nav>
+    <div class="top-actions session-only">
+      <button class="button ghost logout-button" type="button" data-logout>
+        <i data-lucide="log-out"></i>
+        Logout
+      </button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="screen-header compact">
+      <div>
+        <p class="eyebrow">Admin dashboard</p>
+        <h1>Manage stalls, accounts, table QR links, and orders</h1>
+        <p>Admins can create stalls, close or reopen vendors, delete stalls, update login details, and review system activity.</p>
+      </div>
+    </section>
+
+    <section class="dashboard-grid" id="admin-stats"></section>
+
+    <section class="admin-layout">
+      <div class="content-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Stalls</p>
+            <h2>Add, edit, close, or delete food stalls</h2>
+          </div>
+          <button class="button ghost" type="button" id="clear-stall-form">
+            <i data-lucide="eraser"></i>
+            Clear
+          </button>
+        </div>
+
+        <form id="stall-form" class="inline-form wide">
+          <input type="hidden" name="id">
+          <label>
+            <span>Name</span>
+            <input type="text" name="name" required placeholder="Stall name">
+          </label>
+          <label>
+            <span>Cuisine</span>
+            <input type="text" name="cuisine_type" required placeholder="Cuisine type">
+          </label>
+          <label>
+            <span>Wait minutes</span>
+            <input type="number" name="wait_minutes" min="0" step="1" required placeholder="10">
+          </label>
+          <label>
+            <span>Image URL</span>
+            <input type="url" name="image_url" placeholder="https://...">
+          </label>
+          <label class="span-2">
+            <span>Description</span>
+            <input type="text" name="description" placeholder="Short stall description">
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="closed">
+            <span>Closed</span>
+          </label>
+          <button class="button" type="submit">
+            <i data-lucide="save"></i>
+            Save stall
+          </button>
+        </form>
+
+        <div class="vendor-list" id="admin-stalls"></div>
+      </div>
+
+      <aside class="right-stack manager-panel">
+        <section class="content-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Accounts</p>
+              <h2>Staff and admin access</h2>
+            </div>
+            <button class="button ghost" type="button" id="clear-account-form">
+              <i data-lucide="user-plus"></i>
+              New account
+            </button>
+          </div>
+
+          <form id="account-form" class="stack-form">
+            <input type="hidden" name="id">
+            <label>
+              <span>Account type</span>
+              <select name="account_select"></select>
+            </label>
+            <label>
+              <span>Name</span>
+              <input type="text" name="name" required placeholder="Account name">
+            </label>
+            <label>
+              <span>Username</span>
+              <input type="text" name="username" required placeholder="admin">
+            </label>
+            <label>
+              <span>Email</span>
+              <input type="email" name="email" required placeholder="admin@example.com">
+            </label>
+            <label>
+              <span>Phone</span>
+              <input type="tel" name="phone" placeholder="0123456789">
+            </label>
+            <label data-staff-account-field>
+              <span>Assigned stall</span>
+              <select name="assigned_stall_id"></select>
+            </label>
+            <label>
+              <span>Password</span>
+              <input type="password" name="password" placeholder="Leave blank to keep current">
+            </label>
+            <button class="button full" type="submit">
+              <i data-lucide="save"></i>
+              Save account
+            </button>
+          </form>
+
+          <div class="mini-list" id="admin-users"></div>
+        </section>
+
+        <section class="content-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Tables</p>
+              <h2>Table QR codes</h2>
+            </div>
+          </div>
+
+          <div class="qr-list" id="admin-tables"></div>
+        </section>
+      </aside>
+    </section>
+
+    <section class="content-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">System activity</p>
+          <h2>Recent orders</h2>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Table</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Issue</th>
+              <th>Payment</th>
+              <th>Total</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="admin-orders"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Multi-Vendor Food Ordering System</span>
+  </footer>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script defer src="../js/shared/config.js"></script>
+  <script defer src="../js/shared/data.js"></script>
+  <script defer src="../js/shared/supabase.js"></script>
+  <script defer src="../js/shared/app.js"></script>
+  <script defer src="../js/admin/admin.js"></script>
+</body>
+</html>
