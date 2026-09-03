@@ -142,18 +142,6 @@ SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
 SUPABASE_REQUEST_TIMEOUT_MS=2500
 ```
 
-Build the deploy folder:
-
-```bash
-node scripts/build.js
-```
-
-The generated site will be placed in:
-
-```text
-dist/
-```
-
 ## Supabase Setup
 
 1. Create a Supabase project.
@@ -161,8 +149,7 @@ dist/
 3. Run the SQL file in `supabase/schema.sql`.
 4. Copy `.env.example` to `.env`.
 5. Add your Supabase URL and publishable key.
-6. Run `node scripts/build.js`.
-7. Open or deploy the generated `dist/` folder.
+6. Deploy through Netlify or build locally for testing.
 
 The schema includes prototype tables for:
 
@@ -221,28 +208,6 @@ This is a prototype/demo system. Before using it in production:
 - Use a real payment provider for real card or e-wallet payments.
 - Keep `.env` private and never commit it to GitHub.
 
-## GitHub Upload Notes
-
-Safe to commit:
-
-- Source HTML, CSS, and JavaScript files.
-- `scripts/build.js`
-- `supabase/schema.sql`
-- `netlify.toml`
-- `_headers`
-- `_redirects`
-- `.env.example`
-- `.gitignore`
-- `README.md`
-
-Do not commit:
-
-- `.env`
-- `dist/`
-- `node_modules/`
-- `.netlify/`
-- Real API keys or private credentials
-
 ## Main Technologies
 
 - HTML
@@ -253,4 +218,4 @@ Do not commit:
 
 ## License
 
-No license has been selected yet. If you want others to use, modify, or share this project, add a license such as MIT.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
