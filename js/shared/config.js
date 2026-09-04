@@ -1,6 +1,6 @@
 (function () {
   window.AppConfig = {
-    appName: "FoodOrder",
+    appName: "ChillOrder",
     currency: "RM",
     completedOrderRetentionMinutes: 40,
     pendingOrderWarningMinutes: 10,

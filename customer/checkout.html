@@ -9,9 +9,13 @@
 <body data-page="checkout" data-requires-order-access>
   <header class="topbar">
     <a class="brand" href="index.html" aria-label="Food ordering home">
-      <span class="brand-mark">FO</span>
+      <span class="brand-mark" aria-hidden="true">
+        <span class="brand-fork"></span>
+        <span class="brand-spoon"></span>
+        <span class="brand-bot"></span>
+      </span>
       <span>
-        <strong>FoodOrder</strong>
+        <strong>ChillOrder</strong>
         <small>Multi-vendor food court</small>
       </span>
     </a>
@@ -86,7 +90,18 @@
   </main>
 
   <footer class="app-footer">
-    <span>Multi-Vendor Food Ordering System</span>
+    <div class="footer-brand">
+      <span class="brand-mark" aria-hidden="true">
+        <span class="brand-fork"></span>
+        <span class="brand-spoon"></span>
+        <span class="brand-bot"></span>
+      </span>
+      <span>
+        <strong>ChillOrder</strong>
+        <small>Fork, spoon, smart ordering</small>
+      </span>
+    </div>
+    <span class="footer-meta">Multi-Vendor Food Ordering System</span>
   </footer>
 
   <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
