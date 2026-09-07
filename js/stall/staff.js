@@ -391,8 +391,9 @@
     });
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
+  document.addEventListener("DOMContentLoaded", async function () {
     if (!document.body.matches('[data-page="staff"]')) return;
+    if (!await store.validateSession("staff")) return;
     renderAll();
     bindEvents();
     document.addEventListener("foodorder:orders-updated", renderAll);

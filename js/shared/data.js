@@ -11,31 +11,8 @@
   };
 
   window.FoodSeed = {
-    users: [
-      {
-        id: "staff-001",
-        name: "Food Stall Owner",
-        email: "staff@example.com",
-        phone: "0123388771",
-        role: "staff",
-        username: "staff",
-        demo_password: "staff123",
-        assigned_stall_id: "stall-rice",
-        created_at: "2026-01-09T08:35:00.000Z",
-        updated_at: "2026-01-09T08:35:00.000Z"
-      },
-      {
-        id: "admin-001",
-        name: "Admin User",
-        email: "admin@example.com",
-        phone: "0120000000",
-        role: "admin",
-        username: "admin",
-        demo_password: "admin123",
-        created_at: "2026-01-09T08:40:00.000Z",
-        updated_at: "2026-01-09T08:40:00.000Z"
-      }
-    ],
+    // Staff and admin accounts are created in Supabase Auth, never in frontend data.
+    users: [],
     stalls: [
       {
         id: "stall-rice",

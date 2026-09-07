@@ -78,18 +78,6 @@ function applyEnvironmentConfig() {
   fs.writeFileSync(configFile, content);
 }
 
-function stripPrototypePasswords() {
-  const dataFile = path.join(output, "js", "shared", "data.js");
-  let content = fs.readFileSync(dataFile, "utf8");
-  content = content.replace(/\r?\n\s+demo_password:\s*"[^"]*",/g, "");
-  fs.writeFileSync(dataFile, content);
-}
-
-function shouldStripPrototypePasswords() {
-  const value = String(process.env.STRIP_DEMO_PASSWORDS || "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
-}
-
 loadDotEnv();
 assertInsideRoot(output);
 fs.rmSync(output, { recursive: true, force: true });
@@ -107,8 +95,5 @@ for (const file of appFiles) {
 }
 
 applyEnvironmentConfig();
-if (shouldStripPrototypePasswords()) {
-  stripPrototypePasswords();
-}
 
 console.log(`Publish files prepared in ${path.relative(root, output)}/`);

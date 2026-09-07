@@ -329,6 +329,7 @@
     if (!user || !form) return;
 
     form.elements.id.value = user.id;
+    form.elements.auth_user_id.value = user.id;
     form.elements.account_select.value = user.role === "admin" ? "admin" : "staff";
     form.elements.name.value = user.name || "";
     form.elements.username.value = user.username || "";
@@ -337,8 +338,7 @@
     if (form.elements.assigned_stall_id) {
       form.elements.assigned_stall_id.value = user.assigned_stall_id || "";
     }
-    form.elements.password.value = "";
-    form.elements.password.placeholder = "Leave blank to keep current";
+    form.elements.auth_user_id.readOnly = true;
     syncAccountRoleFields();
   }
 
@@ -348,9 +348,9 @@
     var nextRole = role === "admin" ? "admin" : "staff";
     form.reset();
     form.elements.id.value = "";
+    form.elements.auth_user_id.readOnly = false;
     form.elements.account_select.value = nextRole;
     if (form.elements.assigned_stall_id) form.elements.assigned_stall_id.value = "";
-    form.elements.password.placeholder = "Required for new account";
     syncAccountRoleFields();
   }
 
@@ -435,8 +435,9 @@
       accountForm.addEventListener("submit", async function (event) {
         event.preventDefault();
         try {
-          if (!accountForm.elements.id.value && !accountForm.elements.password.value.trim()) {
-            ui.toast("Password is required for a new account.", "error");
+          var authUserId = accountForm.elements.auth_user_id.value.trim();
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(authUserId)) {
+            ui.toast("Enter the UUID created in Supabase Authentication.", "error");
             return;
           }
           var selectedRole = accountRole(accountForm);
@@ -448,14 +449,13 @@
             return;
           }
           var savedUser = await store.saveUser({
-            id: accountForm.elements.id.value,
+            id: accountForm.elements.id.value || authUserId,
             name: accountForm.elements.name.value.trim(),
             username: accountForm.elements.username.value.trim(),
             email: accountForm.elements.email.value.trim(),
             phone: accountForm.elements.phone.value.trim(),
             role: selectedRole,
-            assigned_stall_id: assignedStallId,
-            demo_password: accountForm.elements.password.value
+            assigned_stall_id: assignedStallId
           });
           if (selectedRole === "staff" && savedUser) {
             await linkStaffToStall(savedUser.id, assignedStallId);
@@ -545,8 +545,9 @@
     });
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
+  document.addEventListener("DOMContentLoaded", async function () {
     if (!document.body.matches('[data-page="admin"]')) return;
+    if (!await store.validateSession("admin")) return;
     loadData();
     bindEvents();
   });

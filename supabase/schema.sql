@@ -1,13 +1,11 @@
 create extension if not exists pgcrypto;
 
 create table if not exists public.users (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key references auth.users(id) on delete cascade,
   name text not null,
   email text unique,
   phone text,
   username text unique,
-  demo_password text,
-  password_updated_at timestamp with time zone,
   role text not null default 'customer' check (role in ('customer', 'staff', 'admin')),
   assigned_stall_id uuid,
   created_at timestamp with time zone default now(),
@@ -44,6 +42,13 @@ alter table public.users
 alter table public.users
   add constraint users_assigned_stall_id_fkey
   foreign key (assigned_stall_id) references public.stalls(id) on delete set null;
+
+delete from public.users u
+where not exists (select 1 from auth.users au where au.id = u.id);
+
+alter table public.users drop constraint if exists users_id_fkey;
+alter table public.users
+  add constraint users_id_fkey foreign key (id) references auth.users(id) on delete cascade;
 
 create table if not exists public.menu_items (
   id uuid primary key default gen_random_uuid(),
@@ -103,9 +108,11 @@ create table if not exists public.payments (
   updated_at timestamp with time zone default now()
 );
 
-alter table public.users add column if not exists demo_password text;
-alter table public.users add column if not exists password_updated_at timestamp with time zone;
 alter table public.users add column if not exists assigned_stall_id uuid;
+
+-- Passwords belong exclusively to Supabase Auth. Remove legacy prototype secrets.
+alter table public.users drop column if exists demo_password;
+alter table public.users drop column if exists password_updated_at;
 
 alter table public.orders add column if not exists payment_method text default 'Sandbox Card';
 alter table public.orders add column if not exists transaction_id text;
@@ -164,41 +171,20 @@ create trigger set_payments_updated_at
   before update on public.payments
   for each row execute function public.set_updated_at();
 
-insert into public.users (id, name, email, phone, username, demo_password, password_updated_at, role, assigned_stall_id)
-values
-  ('00000000-0000-4000-8000-000000000002', 'Food Stall Owner', 'staff@example.com', '0123388771', 'staff', 'staff123', now(), 'staff', null),
-  ('00000000-0000-4000-8000-000000000003', 'Admin User', 'admin@example.com', '0120000000', 'admin', 'admin123', now(), 'admin', null)
-on conflict (id) do update set
-  name = excluded.name,
-  email = excluded.email,
-  phone = excluded.phone,
-  username = excluded.username,
-  role = excluded.role,
-  demo_password = coalesce(nullif(public.users.demo_password, ''), excluded.demo_password),
-  password_updated_at = coalesce(public.users.password_updated_at, excluded.password_updated_at);
-
-delete from public.users
-where role = 'customer';
-
 insert into public.stalls (id, name, description, image_url, cuisine_type, rating, staff_id, wait_minutes, closed)
 values
-  ('10000000-0000-4000-8000-000000000001', 'Nasi Corner', 'Comfort rice plates with quick lunch sets.', 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=900&q=80', 'Rice', 4.7, '00000000-0000-4000-8000-000000000002', 12, false),
-  ('10000000-0000-4000-8000-000000000002', 'Wok Noodle Bar', 'Hot noodles, soup bowls, and wok-fried specials.', 'https://images.unsplash.com/photo-1552611052-33e04de081de?auto=format&fit=crop&w=900&q=80', 'Noodles', 4.5, '00000000-0000-4000-8000-000000000002', 10, false),
-  ('10000000-0000-4000-8000-000000000003', 'Grill Station', 'Burgers, satay, and grilled snacks.', 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80', 'Grill', 4.6, '00000000-0000-4000-8000-000000000002', 15, false),
-  ('10000000-0000-4000-8000-000000000004', 'Fresh Sip', 'Cold drinks, tea, coffee, and desserts.', 'https://images.unsplash.com/photo-1544145945-f90425340c7e?auto=format&fit=crop&w=900&q=80', 'Drinks', 4.8, '00000000-0000-4000-8000-000000000002', 5, false)
+  ('10000000-0000-4000-8000-000000000001', 'Nasi Corner', 'Comfort rice plates with quick lunch sets.', 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=900&q=80', 'Rice', 4.7, null, 12, false),
+  ('10000000-0000-4000-8000-000000000002', 'Wok Noodle Bar', 'Hot noodles, soup bowls, and wok-fried specials.', 'https://images.unsplash.com/photo-1552611052-33e04de081de?auto=format&fit=crop&w=900&q=80', 'Noodles', 4.5, null, 10, false),
+  ('10000000-0000-4000-8000-000000000003', 'Grill Station', 'Burgers, satay, and grilled snacks.', 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80', 'Grill', 4.6, null, 15, false),
+  ('10000000-0000-4000-8000-000000000004', 'Fresh Sip', 'Cold drinks, tea, coffee, and desserts.', 'https://images.unsplash.com/photo-1544145945-f90425340c7e?auto=format&fit=crop&w=900&q=80', 'Drinks', 4.8, null, 5, false)
 on conflict (id) do update set
   name = excluded.name,
   description = excluded.description,
   image_url = excluded.image_url,
   cuisine_type = excluded.cuisine_type,
   rating = excluded.rating,
-  staff_id = excluded.staff_id,
   wait_minutes = excluded.wait_minutes,
   closed = excluded.closed;
-
-update public.users
-set assigned_stall_id = '10000000-0000-4000-8000-000000000001'
-where id = '00000000-0000-4000-8000-000000000002';
 
 insert into public.menu_items (id, stall_id, name, description, price, image_url, category, available, stock_quantity)
 values
@@ -246,15 +232,43 @@ alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.payments enable row level security;
 
-grant select, insert, update, delete on
-  public.users,
-  public.tables,
-  public.stalls,
-  public.menu_items,
-  public.orders,
-  public.order_items,
-  public.payments
-to anon, authenticated;
+revoke all on public.users, public.tables, public.stalls, public.menu_items,
+  public.orders, public.order_items, public.payments from anon, authenticated;
+
+grant select on public.tables, public.stalls, public.menu_items to anon, authenticated;
+grant insert on public.orders, public.order_items, public.payments to anon, authenticated;
+grant select on public.orders, public.order_items, public.payments to anon, authenticated;
+grant select, insert, update, delete on public.users, public.tables, public.stalls, public.menu_items to authenticated;
+grant update (status, payment_status, pending_warning_at, auto_cancelled_at,
+  cancellation_reason, stock_released_at, updated_at) on public.orders to authenticated;
+grant update (status, updated_at) on public.payments to authenticated;
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.users
+    where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+create or replace function public.assigned_stall()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select assigned_stall_id from public.users where id = auth.uid() and role = 'staff';
+$$;
+
+revoke all on function public.is_admin() from public;
+revoke all on function public.assigned_stall() from public;
+grant execute on function public.is_admin(), public.assigned_stall() to authenticated;
 
 drop policy if exists "Prototype public access" on public.users;
 drop policy if exists "Prototype public access" on public.tables;
@@ -264,13 +278,71 @@ drop policy if exists "Prototype public access" on public.orders;
 drop policy if exists "Prototype public access" on public.order_items;
 drop policy if exists "Prototype public access" on public.payments;
 
-create policy "Prototype public access" on public.users for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.tables for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.stalls for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.menu_items for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.orders for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.order_items for all to anon, authenticated using (true) with check (true);
-create policy "Prototype public access" on public.payments for all to anon, authenticated using (true) with check (true);
+drop policy if exists "Users read own or admin" on public.users;
+drop policy if exists "Admins create users" on public.users;
+drop policy if exists "Admins update users" on public.users;
+drop policy if exists "Public reads tables" on public.tables;
+drop policy if exists "Admins manage tables" on public.tables;
+drop policy if exists "Public reads stalls" on public.stalls;
+drop policy if exists "Admins create stalls" on public.stalls;
+drop policy if exists "Admins delete stalls" on public.stalls;
+drop policy if exists "Assigned staff update stall" on public.stalls;
+drop policy if exists "Public reads menu" on public.menu_items;
+drop policy if exists "Assigned staff create menu" on public.menu_items;
+drop policy if exists "Assigned staff update menu" on public.menu_items;
+drop policy if exists "Assigned staff delete menu" on public.menu_items;
+drop policy if exists "Customers create orders" on public.orders;
+drop policy if exists "Order tracking reads orders" on public.orders;
+drop policy if exists "Assigned staff update orders" on public.orders;
+drop policy if exists "Customers create order items" on public.order_items;
+drop policy if exists "Order tracking reads order items" on public.order_items;
+drop policy if exists "Customers create payments" on public.payments;
+drop policy if exists "Order tracking reads payments" on public.payments;
+drop policy if exists "Assigned staff update payments" on public.payments;
+
+create policy "Users read own or admin" on public.users for select to authenticated
+using (id = auth.uid() or public.is_admin());
+create policy "Admins create users" on public.users for insert to authenticated
+with check (public.is_admin() and role in ('staff', 'admin'));
+create policy "Admins update users" on public.users for update to authenticated
+using (public.is_admin()) with check (public.is_admin() and role in ('staff', 'admin'));
+
+create policy "Public reads tables" on public.tables for select to anon, authenticated using (true);
+create policy "Admins manage tables" on public.tables for all to authenticated
+using (public.is_admin()) with check (public.is_admin());
+
+create policy "Public reads stalls" on public.stalls for select to anon, authenticated using (true);
+create policy "Admins create stalls" on public.stalls for insert to authenticated with check (public.is_admin());
+create policy "Admins delete stalls" on public.stalls for delete to authenticated using (public.is_admin());
+create policy "Assigned staff update stall" on public.stalls for update to authenticated
+using (public.is_admin() or id = public.assigned_stall())
+with check (public.is_admin() or id = public.assigned_stall());
+
+create policy "Public reads menu" on public.menu_items for select to anon, authenticated using (true);
+create policy "Assigned staff create menu" on public.menu_items for insert to authenticated
+with check (public.is_admin() or stall_id = public.assigned_stall());
+create policy "Assigned staff update menu" on public.menu_items for update to authenticated
+using (public.is_admin() or stall_id = public.assigned_stall())
+with check (public.is_admin() or stall_id = public.assigned_stall());
+create policy "Assigned staff delete menu" on public.menu_items for delete to authenticated
+using (public.is_admin() or stall_id = public.assigned_stall());
+
+create policy "Customers create orders" on public.orders for insert to anon, authenticated with check (true);
+create policy "Order tracking reads orders" on public.orders for select to anon, authenticated using (true);
+create policy "Assigned staff update orders" on public.orders for update to authenticated
+using (public.is_admin() or exists (
+  select 1 from public.order_items oi where oi.order_id = orders.id and oi.stall_id = public.assigned_stall()
+));
+
+create policy "Customers create order items" on public.order_items for insert to anon, authenticated with check (true);
+create policy "Order tracking reads order items" on public.order_items for select to anon, authenticated using (true);
+
+create policy "Customers create payments" on public.payments for insert to anon, authenticated with check (true);
+create policy "Order tracking reads payments" on public.payments for select to anon, authenticated using (true);
+create policy "Assigned staff update payments" on public.payments for update to authenticated
+using (public.is_admin() or exists (
+  select 1 from public.order_items oi where oi.order_id = payments.order_id and oi.stall_id = public.assigned_stall()
+));
 
 do $$
 begin

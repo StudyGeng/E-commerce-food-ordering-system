@@ -328,27 +328,6 @@
     return String(value || "").trim().toLowerCase();
   }
 
-  function findSeedUserFor(user) {
-    return (seed.users || []).find(function (entry) {
-      var sameRole = !entry.role || !user.role || entry.role === user.role;
-      var sameId = entry.id && user.id && entry.id === user.id;
-      var sameUsername = entry.username && user.username &&
-        normalizeLoginIdentity(entry.username) === normalizeLoginIdentity(user.username);
-      var sameEmail = entry.email && user.email &&
-        normalizeLoginIdentity(entry.email) === normalizeLoginIdentity(user.email);
-      return sameRole && (sameId || sameUsername || sameEmail);
-    });
-  }
-
-  function applySeedDemoPasswords(users) {
-    return (users || []).map(function (user) {
-      if (user.demo_password) return user;
-      var seedUser = findSeedUserFor(user);
-      if (!seedUser || !seedUser.demo_password) return user;
-      return Object.assign({}, user, { demo_password: seedUser.demo_password });
-    });
-  }
-
   function isConfigured(value) {
     return Boolean(value && !String(value).includes("your-"));
   }
@@ -400,7 +379,7 @@
   function noteRemoteError(error) {
     if (!error) return false;
     console.warn(error);
-    if (!isNetworkError(error)) return false;
+    if (!isNetworkError(error)) throw new Error(error.message || "Database request was rejected.");
 
     remoteUnavailable = true;
     return true;
@@ -528,12 +507,12 @@
     if (canUseRemote()) {
       var remote = await client.from("users").select("*").order("created_at", { ascending: true });
       if (!remote.error && remote.data && shouldUseRemoteRows(remote.data, seed.users, "users")) {
-        return applySeedDemoPasswords(remote.data);
+        return remote.data;
       }
       noteRemoteError(remote.error);
     }
 
-    return applySeedDemoPasswords(clone(getState().users));
+    return clone(getState().users);
   }
 
   async function listOrders(filters) {
@@ -1212,6 +1191,8 @@
   }
 
   async function saveUser(payload) {
+    var session = getSession();
+    if (!session || session.role !== "admin") throw new Error("Admin access is required.");
     var clean = {
       name: payload.name,
       email: payload.email,
@@ -1222,22 +1203,11 @@
       updated_at: now()
     };
 
-    if (payload.demo_password) {
-      clean.demo_password = payload.demo_password;
-      clean.password_updated_at = now();
-    }
-
     if (canUseRemote()) {
-      if (payload.id) {
-        var updated = await client.from("users").update(clean).eq("id", payload.id).select("*").single();
-        if (!updated.error && updated.data) return updated.data;
-        noteRemoteError(updated.error);
-      } else {
-        clean.created_at = now();
-        var created = await client.from("users").insert(clean).select("*").single();
-        if (!created.error && created.data) return created.data;
-        noteRemoteError(created.error);
-      }
+      clean.id = payload.id;
+      var saved = await client.from("users").upsert(clean, { onConflict: "id" }).select("*").single();
+      if (!saved.error && saved.data) return saved.data;
+      noteRemoteError(saved.error);
     }
 
     var state = getState();
@@ -1256,17 +1226,23 @@
   }
 
   async function login(username, password, role) {
-    var users = applySeedDemoPasswords(await listUsers());
-    var cleanUsername = normalizeLoginIdentity(username);
-    var user = users.find(function (entry) {
-      var matchesName = normalizeLoginIdentity(entry.username) === cleanUsername;
-      var matchesEmail = normalizeLoginIdentity(entry.email) === cleanUsername;
-      var matchesRole = !role || entry.role === role;
-      var matchesPassword = String(entry.demo_password || "") === String(password || "");
-      return (matchesName || matchesEmail) && matchesRole && matchesPassword;
+    if (!client) throw new Error("Secure login requires Supabase configuration.");
+    var authResult = await client.auth.signInWithPassword({
+      email: normalizeLoginIdentity(username),
+      password: String(password || "")
     });
+    if (authResult.error) throw new Error("Invalid email or password.");
 
-    if (!user) throw new Error("Invalid login.");
+    var profileResult = await client.from("users").select("*").eq("id", authResult.data.user.id).single();
+    if (profileResult.error || !profileResult.data) {
+      await client.auth.signOut();
+      throw new Error("This login has no staff or admin profile.");
+    }
+    var user = profileResult.data;
+    if (role && user.role !== role) {
+      await client.auth.signOut();
+      throw new Error("This account does not have " + role + " access.");
+    }
     var session = {
       id: user.id,
       name: user.name,
@@ -1289,8 +1265,35 @@
     }
   }
 
+  async function validateSession(requiredRole) {
+    if (!client) return null;
+    var authResult = await client.auth.getSession();
+    var authSession = authResult.data && authResult.data.session;
+    if (!authSession || !authSession.user) {
+      localStorage.removeItem(sessionKey);
+      return null;
+    }
+    var profileResult = await client.from("users").select("*").eq("id", authSession.user.id).single();
+    if (profileResult.error || !profileResult.data || (requiredRole && profileResult.data.role !== requiredRole)) {
+      localStorage.removeItem(sessionKey);
+      return null;
+    }
+    var profile = profileResult.data;
+    var session = {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      username: profile.username,
+      role: profile.role,
+      assigned_stall_id: profile.assigned_stall_id || null
+    };
+    localStorage.setItem(sessionKey, JSON.stringify(session));
+    return session;
+  }
+
   function logout() {
     localStorage.removeItem(sessionKey);
+    if (client) client.auth.signOut();
   }
 
   window.FoodStore = {
@@ -1309,6 +1312,7 @@
     clearCurrentTable: clearCurrentTable,
     login: login,
     getSession: getSession,
+    validateSession: validateSession,
     logout: logout,
     addToCart: addToCart,
     updateCartItem: updateCartItem,

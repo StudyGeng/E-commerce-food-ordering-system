@@ -8,7 +8,6 @@
     var role = new URLSearchParams(window.location.search).get("role") || document.body.dataset.loginRole;
     if (role === "admin" || role === "staff") {
       form.elements.role.value = role;
-      form.elements.username.value = role;
     }
   }
 

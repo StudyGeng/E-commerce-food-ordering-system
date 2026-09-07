@@ -177,11 +177,13 @@
     return false;
   }
 
-  function requireRoleAccess() {
+  async function requireRoleAccess() {
     var requiredRole = document.body.dataset.requiresRole;
     if (!requiredRole) return true;
 
-    var session = window.FoodStore && window.FoodStore.getSession && window.FoodStore.getSession();
+    var session = window.FoodStore && window.FoodStore.validateSession
+      ? await window.FoodStore.validateSession(requiredRole)
+      : null;
     if (session && session.role === requiredRole) return true;
 
     window.location.replace("../main/login.html?role=" + encodeURIComponent(requiredRole));
@@ -773,7 +775,7 @@
 
   document.addEventListener("DOMContentLoaded", async function () {
     await setupTableContext();
-    var canUsePage = requireOrderAccess() && requireRoleAccess();
+    var canUsePage = requireOrderAccess() && await requireRoleAccess();
     setupNavigation();
     setupLogout();
     setupOrderBillActions();

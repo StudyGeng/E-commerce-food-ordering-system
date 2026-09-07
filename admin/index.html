@@ -110,6 +110,10 @@
           <form id="account-form" class="stack-form">
             <input type="hidden" name="id">
             <label>
+              <span>Supabase Auth user ID</span>
+              <input type="text" name="auth_user_id" required placeholder="UUID from Authentication > Users">
+            </label>
+            <label>
               <span>Account type</span>
               <select name="account_select"></select>
             </label>
@@ -119,11 +123,11 @@
             </label>
             <label>
               <span>Username</span>
-              <input type="text" name="username" required placeholder="admin">
+              <input type="text" name="username" required placeholder="Display name">
             </label>
             <label>
               <span>Email</span>
-              <input type="email" name="email" required placeholder="admin@example.com">
+              <input type="email" name="email" required placeholder="name@example.com">
             </label>
             <label>
               <span>Phone</span>
@@ -133,10 +137,7 @@
               <span>Assigned stall</span>
               <select name="assigned_stall_id"></select>
             </label>
-            <label>
-              <span>Password</span>
-              <input type="password" name="password" placeholder="Leave blank to keep current">
-            </label>
+            <p class="muted">Passwords are created or reset only in Supabase Authentication and are never shown here.</p>
             <button class="button full" type="submit">
               <i data-lucide="save"></i>
               Save account
