@@ -263,6 +263,9 @@
     return {
       users: clone(seed.users || []),
       stalls: clone(seed.stalls || []),
+      promotion_plans: clone(seed.promotion_plans || []),
+      stall_promotions: clone(seed.stall_promotions || []),
+      stall_popularity_metrics: clone(seed.stall_popularity_metrics || []),
       menu_items: clone(seed.menu_items || []),
       tables: clone(seed.tables || []),
       orders: clone(seed.orders || []),
@@ -289,6 +292,25 @@
       }) || {};
       return Object.assign({ closed: false, wait_minutes: 10 }, seedStall, stall);
     });
+
+    next.promotion_plans = (next.promotion_plans && next.promotion_plans.length)
+      ? next.promotion_plans
+      : fresh.promotion_plans;
+    next.stall_promotions = (next.stall_promotions || []).map(function (promotion) {
+      return Object.assign({
+        plan_slug: "free",
+        campaign_status: "inactive",
+        payment_status: "pending",
+        headline: "",
+        price_minor: 0,
+        currency: "MYR",
+        starts_at: null,
+        ends_at: null
+      }, promotion);
+    });
+    next.stall_popularity_metrics = (next.stall_popularity_metrics && next.stall_popularity_metrics.length)
+      ? next.stall_popularity_metrics
+      : fresh.stall_popularity_metrics;
 
     next.menu_items = (next.menu_items || []).map(function (item) {
       var seedItem = fresh.menu_items.find(function (entry) {
@@ -361,18 +383,24 @@
   }
 
   var client = getClient();
+  var promotionRemoteConfigured = isConfigured(config.supabaseUrl) &&
+    isConfigured(config.supabasePublishableKey || config.supabaseAnonKey);
 
   function canUseRemote() {
     return Boolean(client && !remoteUnavailable);
   }
 
   function isNetworkError(error) {
-    var text = String(
-      (error && (error.message || error.details || error.hint || error.code || error.name)) || ""
-    ).toLowerCase();
+    var text = error ? [error.message, error.details, error.hint, error.code, error.name]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase() : "";
     return text.includes("failed to fetch") ||
+      text.includes("fetch failed") ||
       text.includes("networkerror") ||
+      text.includes("network request failed") ||
       text.includes("aborterror") ||
+      text.includes("aborted") ||
       text.includes("load failed");
   }
 
@@ -413,6 +441,284 @@
     return rows.slice().sort(function (a, b) {
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
+  }
+
+  function promotionIsLive(promotion, referenceTime) {
+    if (!promotion) return false;
+    if (["featured", "premium"].indexOf(promotion.plan_slug) === -1) return false;
+    if (promotion.campaign_status !== "active" || promotion.payment_status !== "paid") return false;
+
+    if (!promotion.starts_at || !promotion.ends_at) return false;
+    var timestamp = referenceTime === undefined ? Date.now() : new Date(referenceTime).getTime();
+    var startsAt = new Date(promotion.starts_at).getTime();
+    var endsAt = new Date(promotion.ends_at).getTime();
+    if (!Number.isFinite(timestamp) || !Number.isFinite(startsAt) || !Number.isFinite(endsAt)) return false;
+    return startsAt <= timestamp && timestamp < endsAt;
+  }
+
+  function localStallDiscovery(includeSponsored) {
+    var state = getState();
+
+    return (state.stalls || []).filter(function (stall) {
+      return !stall.closed && (state.menu_items || []).some(function (item) {
+        return item.stall_id === stall.id && item.available && safeNumber(item.stock_quantity) > 0;
+      });
+    }).map(function (stall) {
+      var popularity = (state.stall_popularity_metrics || []).find(function (entry) {
+        return entry.stall_id === stall.id;
+      });
+
+      var promotion = (state.stall_promotions || []).find(function (entry) {
+        return entry.stall_id === stall.id;
+      });
+      var live = Boolean(includeSponsored && promotionIsLive(promotion));
+      var plan = live && (state.promotion_plans || []).find(function (entry) {
+        return entry.slug === promotion.plan_slug;
+      });
+
+      return {
+        stall_id: stall.id,
+        is_sponsored: live,
+        promotion_plan: live ? promotion.plan_slug : null,
+        promotion_headline: live ? promotion.headline || "" : "",
+        sponsor_rank: live ? safeNumber(plan && plan.placement_priority) : 0,
+        recent_orders: Math.max(0, Math.floor(safeNumber(popularity && popularity.completed_orders_30d))),
+        recent_items: Math.max(0, Math.floor(safeNumber(popularity && popularity.items_sold_30d)))
+      };
+    });
+  }
+
+  async function listPromotionPlans(filters) {
+    var options = filters || {};
+    if (canUseRemote()) {
+      var remote = client.from("promotion_plans").select("*").order("placement_priority", { ascending: true });
+      if (!options.includeInactive) remote = remote.eq("active", true);
+      remote = await remote;
+      if (!remote.error && remote.data) return remote.data;
+      if (!isNetworkError(remote.error)) {
+        console.warn(remote.error);
+        var fallbackPlans = clone(seed.promotion_plans || []);
+        return options.includeInactive ? fallbackPlans : fallbackPlans.filter(function (plan) { return plan.active; });
+      }
+      noteRemoteError(remote.error);
+    }
+
+    var plans = clone(getState().promotion_plans || []);
+    if (!options.includeInactive) {
+      plans = plans.filter(function (plan) { return plan.active; });
+    }
+    return plans.sort(function (a, b) {
+      return safeNumber(a.placement_priority) - safeNumber(b.placement_priority);
+    });
+  }
+
+  async function listStallPromotions(filters) {
+    var options = filters || {};
+    if (client && canUseRemote()) {
+      var remote;
+      try {
+        remote = client.from("stall_promotions").select("*").order("updated_at", { ascending: false });
+        if (options.stallId) remote = remote.eq("stall_id", options.stallId);
+        remote = await remote;
+      } catch (error) {
+        if (isNetworkError(error)) noteRemoteError(error);
+        else console.warn(error);
+        return [];
+      }
+      if (!remote.error && remote.data) return remote.data;
+      if (!isNetworkError(remote.error)) {
+        console.warn(remote.error);
+        return [];
+      }
+      noteRemoteError(remote.error);
+    }
+
+    // Never expose seeded/demo paid entitlements when a configured database is offline.
+    if (promotionRemoteConfigured) return [];
+
+    var promotions = clone(getState().stall_promotions || []);
+    if (options.stallId) {
+      promotions = promotions.filter(function (promotion) {
+        return promotion.stall_id === options.stallId;
+      });
+    }
+    return promotions;
+  }
+
+  async function listStallDiscovery() {
+    if (canUseRemote()) {
+      var remote;
+      try {
+        remote = await client.rpc("get_stall_discovery");
+      } catch (error) {
+        if (isNetworkError(error)) noteRemoteError(error);
+        else console.warn(error);
+        return localStallDiscovery(false);
+      }
+      if (!remote.error && remote.data) return remote.data;
+
+      // A configured production database must never inherit demo paid entitlements.
+      if (!isNetworkError(remote.error)) {
+        console.warn(remote.error);
+        return [];
+      }
+      noteRemoteError(remote.error);
+      return localStallDiscovery(false);
+    }
+
+    // If a configured client went offline earlier in this session, keep fallback rankings organic.
+    return localStallDiscovery(!promotionRemoteConfigured);
+  }
+
+  async function saveStallPromotion(payload) {
+    if (!payload || !payload.stall_id) throw new Error("Choose a stall for this promotion.");
+
+    var startsAt = payload.starts_at || null;
+    var endsAt = payload.ends_at || null;
+    var startsAtTime = startsAt ? new Date(startsAt).getTime() : null;
+    var endsAtTime = endsAt ? new Date(endsAt).getTime() : null;
+    if ((startsAt && !Number.isFinite(startsAtTime)) || (endsAt && !Number.isFinite(endsAtTime))) {
+      throw new Error("Enter a valid promotion start and end time.");
+    }
+    if (startsAt && endsAt && endsAtTime <= startsAtTime) {
+      throw new Error("Promotion end time must be after its start time.");
+    }
+
+    var clean = {
+      stall_id: payload.stall_id,
+      plan_slug: payload.plan_slug || "free",
+      campaign_status: payload.campaign_status || "inactive",
+      payment_status: payload.payment_status || "pending",
+      headline: payload.headline || "",
+      price_minor: Math.max(0, Math.floor(safeNumber(payload.price_minor))),
+      currency: String(payload.currency || "MYR").slice(0, 3).toUpperCase(),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      payment_reference: payload.payment_reference || null,
+      requested_at: payload.requested_at || now(),
+      paid_at: payload.payment_status === "paid" ? (payload.paid_at || now()) : null,
+      updated_at: now()
+    };
+
+    if (clean.plan_slug === "free") {
+      clean.campaign_status = "inactive";
+      clean.payment_status = "pending";
+      clean.price_minor = 0;
+      clean.paid_at = null;
+    }
+
+    var requiresSchedule = ["featured", "premium"].indexOf(clean.plan_slug) !== -1 &&
+      clean.campaign_status === "active" && clean.payment_status === "paid";
+    if (requiresSchedule && (!startsAt || !endsAt)) {
+      throw new Error("Active paid promotions require both a start and end time.");
+    }
+
+    if (promotionRemoteConfigured) {
+      if (!client || !canUseRemote()) {
+        throw new Error("Promotion service is unavailable; nothing was saved.");
+      }
+
+      var remote;
+      try {
+        remote = await client
+          .from("stall_promotions")
+          .upsert(clean, { onConflict: "stall_id" })
+          .select("*")
+          .single();
+      } catch (error) {
+        if (isNetworkError(error)) {
+          noteRemoteError(error);
+          throw new Error("Promotion service is unavailable; nothing was saved.");
+        }
+        throw error;
+      }
+      if (!remote.error && remote.data) return remote.data;
+      if (isNetworkError(remote.error)) {
+        noteRemoteError(remote.error);
+        throw new Error("Promotion service is unavailable; nothing was saved.");
+      }
+      throw new Error((remote.error && remote.error.message) || "Promotion could not be saved.");
+    }
+
+    var state = getState();
+    var existing = (state.stall_promotions || []).find(function (promotion) {
+      return promotion.stall_id === clean.stall_id;
+    });
+    if (existing) {
+      Object.assign(existing, clean);
+    } else {
+      existing = Object.assign({ created_at: now() }, clean);
+      state.stall_promotions.push(existing);
+    }
+    saveState(state);
+    return clone(existing);
+  }
+
+  async function requestStallPromotion(payload) {
+    var planSlug = payload && payload.plan_slug;
+    var headline = String((payload && payload.headline) || "").trim();
+    if (["featured", "premium"].indexOf(planSlug) === -1) {
+      throw new Error("Choose Featured or Premium.");
+    }
+
+    if (promotionRemoteConfigured) {
+      if (!client || !canUseRemote()) {
+        throw new Error("Promotion service is unavailable; nothing was requested.");
+      }
+
+      var remote;
+      try {
+        remote = await client.rpc("request_stall_promotion", {
+          requested_plan: planSlug,
+          requested_headline: headline
+        });
+      } catch (error) {
+        if (isNetworkError(error)) {
+          noteRemoteError(error);
+          throw new Error("Promotion service is unavailable; nothing was requested.");
+        }
+        throw error;
+      }
+      if (!remote.error) return true;
+      if (isNetworkError(remote.error)) {
+        noteRemoteError(remote.error);
+        throw new Error("Promotion service is unavailable; nothing was requested.");
+      }
+      throw new Error((remote.error && remote.error.message) || "Promotion request could not be submitted.");
+    }
+
+    var session = getSession();
+    var stallId = session && session.role === "staff" ? session.assigned_stall_id : null;
+    if (!stallId) throw new Error("No stall is assigned to this account.");
+    var state = getState();
+    var current = (state.stall_promotions || []).find(function (promotion) {
+      return promotion.stall_id === stallId;
+    });
+    var currentEnd = current && current.ends_at ? new Date(current.ends_at).getTime() : null;
+    var hasApprovedCampaign = Boolean(
+      current &&
+      current.campaign_status === "active" &&
+      current.payment_status === "paid" &&
+      ["featured", "premium"].indexOf(current.plan_slug) !== -1 &&
+      !(Number.isFinite(currentEnd) && currentEnd <= Date.now())
+    );
+    if (hasApprovedCampaign) throw new Error("This stall already has an approved promotion.");
+    var plan = (state.promotion_plans || []).find(function (entry) {
+      return entry.slug === planSlug && entry.active;
+    });
+    if (!plan) throw new Error("This promotion plan is not available.");
+
+    await saveStallPromotion({
+      stall_id: stallId,
+      plan_slug: plan.slug,
+      campaign_status: "requested",
+      payment_status: "pending",
+      headline: headline,
+      price_minor: plan.price_minor,
+      currency: plan.currency,
+      requested_at: now()
+    });
+    return true;
   }
 
   function hydrateOrders(orders, orderItems, menuItems, stalls) {
@@ -1159,6 +1465,9 @@
     state.stalls = state.stalls.filter(function (stall) {
       return stall.id !== stallId;
     });
+    state.stall_promotions = (state.stall_promotions || []).filter(function (promotion) {
+      return promotion.stall_id !== stallId;
+    });
     state.menu_items = state.menu_items.filter(function (item) {
       return item.stall_id !== stallId;
     });
@@ -1298,6 +1607,9 @@
 
   window.FoodStore = {
     listStalls: listStalls,
+    listPromotionPlans: listPromotionPlans,
+    listStallPromotions: listStallPromotions,
+    listStallDiscovery: listStallDiscovery,
     listMenuItems: listMenuItems,
     listUsers: listUsers,
     listOrders: listOrders,
@@ -1324,6 +1636,8 @@
     saveMenuItem: saveMenuItem,
     deleteMenuItem: deleteMenuItem,
     saveStall: saveStall,
+    saveStallPromotion: saveStallPromotion,
+    requestStallPromotion: requestStallPromotion,
     deleteStall: deleteStall,
     toggleStallClosed: toggleStallClosed,
     saveUser: saveUser

@@ -84,12 +84,24 @@
       </button>
     </section>
 
+    <section class="sponsored-section" id="sponsored-section" aria-labelledby="sponsored-title" hidden>
+      <div class="section-heading sponsored-heading">
+        <div>
+          <p class="eyebrow">Paid promotion</p>
+          <h2 id="sponsored-title">Sponsored stalls</h2>
+        </div>
+        <span class="sponsored-disclosure"><i data-lucide="badge-dollar-sign"></i> Clearly labeled ads</span>
+      </div>
+      <div class="sponsored-grid" id="sponsored-stalls" aria-live="polite"></div>
+      <p class="sponsored-note">Sponsored stalls pay for placement, but they must still match your search and be open with food in stock.</p>
+    </section>
+
     <section class="customer-grid">
       <aside class="side-panel">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Available stalls</p>
-            <h2>Vendors</h2>
+            <p class="eyebrow">Organic discovery</p>
+            <h2>Popular &amp; more</h2>
           </div>
         </div>
         <div class="stall-list" id="stall-list"></div>
@@ -99,9 +111,9 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Menu</p>
-            <h2 id="menu-title">All food items</h2>
+            <h2 id="menu-title" tabindex="-1">All food items</h2>
           </div>
-          <span class="count-pill" id="result-count">0 items</span>
+          <span class="count-pill" id="result-count" role="status" aria-live="polite">0 items</span>
         </div>
         <div class="menu-grid" id="menu-grid"></div>
       </section>

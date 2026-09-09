@@ -5,10 +5,119 @@
   var selectedKey = "foodorder_staff_selected_stall_v1";
   var cache = {
     stalls: [],
+    promotionPlans: [],
+    promotions: [],
     menuItems: [],
     orders: [],
     selectedStallId: "all"
   };
+
+  function priceLabel(plan) {
+    return String(plan.currency || "MYR") + " " + (Number(plan.price_minor || 0) / 100).toFixed(2) + "/month";
+  }
+
+  function activePromotion() {
+    var stallId = activeStallId();
+    return cache.promotions.find(function (promotion) {
+      return promotion.stall_id === stallId;
+    }) || null;
+  }
+
+  function promotionScheduleIsLive(promotion) {
+    if (!promotion || promotion.campaign_status !== "active" || promotion.payment_status !== "paid") return false;
+    if (["featured", "premium"].indexOf(promotion.plan_slug) === -1) return false;
+    var startsAt = promotion.starts_at ? new Date(promotion.starts_at).getTime() : null;
+    var endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
+    return Number.isFinite(startsAt) && Number.isFinite(endsAt) &&
+      startsAt <= Date.now() && Date.now() < endsAt;
+  }
+
+  function promotionIsLive(promotion) {
+    if (!promotionScheduleIsLive(promotion)) return false;
+    var stall = cache.stalls.find(function (record) {
+      return record.id === promotion.stall_id;
+    });
+    if (!stall || stall.closed) return false;
+    return cache.menuItems.some(function (item) {
+      return item.stall_id === stall.id && item.available && Number(item.stock_quantity || 0) > 0;
+    });
+  }
+
+  function promotionIsApproved(promotion) {
+    if (!promotion || promotion.campaign_status !== "active" || promotion.payment_status !== "paid") return false;
+    if (["featured", "premium"].indexOf(promotion.plan_slug) === -1) return false;
+    var endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
+    return !(Number.isFinite(endsAt) && Date.now() >= endsAt);
+  }
+
+  function promotionStatusLabel(promotion) {
+    if (!promotion || promotion.plan_slug === "free") return "Organic listing";
+    if (promotionIsLive(promotion)) return "Sponsored placement live";
+    if (promotionScheduleIsLive(promotion)) return "Active \u00b7 unavailable to customers";
+    if (promotion.payment_status === "failed") return "Payment failed";
+    if (promotion.payment_status === "refunded") return "Payment refunded";
+    if (promotion.campaign_status === "requested") return "Waiting for admin approval";
+    if (promotion.payment_status === "pending") return "Payment confirmation pending";
+    if (promotion.campaign_status === "paused") return "Promotion paused";
+    if (promotion.campaign_status === "ended") return "Promotion ended";
+    if (promotion.campaign_status === "cancelled") return "Promotion cancelled";
+    var startsAt = promotion.starts_at ? new Date(promotion.starts_at).getTime() : null;
+    var endsAt = promotion.ends_at ? new Date(promotion.ends_at).getTime() : null;
+    if (Number.isFinite(startsAt) && Date.now() < startsAt) return "Scheduled";
+    if (Number.isFinite(endsAt) && Date.now() >= endsAt) return "Promotion expired";
+    return "Promotion inactive";
+  }
+
+  function renderPromotionPanel() {
+    var statusTarget = ui.qs("#staff-promotion-status");
+    var form = ui.qs("#promotion-request-form");
+    if (!statusTarget || !form) return;
+    var promotion = activePromotion();
+    var plan = cache.promotionPlans.find(function (entry) {
+      return entry.slug === (promotion && promotion.plan_slug);
+    });
+    var live = promotionIsLive(promotion);
+    var scheduleLive = promotionScheduleIsLive(promotion);
+    var requestLocked = promotionIsApproved(promotion);
+    var detail = scheduleLive && !live
+      ? "Open the stall and make an in-stock menu item available to show this promotion."
+      : promotion && promotion.ends_at
+      ? "Until " + new Date(promotion.ends_at).toLocaleDateString()
+      : "Admin activation required";
+    statusTarget.innerHTML = [
+      '<div class="promotion-current-status' + (live ? " is-live" : "") + '">',
+      '<span class="tag ' + (live ? "status-paid" : promotion && promotion.campaign_status === "requested" ? "gold" : "") + '">' +
+        ui.escapeHtml(promotionStatusLabel(promotion)) + "</span>",
+      "<strong>" + ui.escapeHtml(plan ? plan.name + " · " + priceLabel(plan) : "Free plan") + "</strong>",
+      "<p>" + ui.escapeHtml(detail) + "</p>",
+      "</div>"
+    ].join("");
+
+    var selectedPlan = form.elements.plan_slug.value || (plan && plan.slug !== "free" ? plan.slug : "featured");
+    form.elements.plan_slug.innerHTML = cache.promotionPlans.filter(function (entry) {
+      return entry.active && entry.slug !== "free";
+    }).map(function (entry) {
+      return '<option value="' + ui.escapeHtml(entry.slug) + '">' +
+        ui.escapeHtml(entry.name + " · " + priceLabel(entry)) + "</option>";
+    }).join("");
+    form.elements.plan_slug.value = cache.promotionPlans.some(function (entry) {
+      return entry.slug === selectedPlan && entry.slug !== "free";
+    }) ? selectedPlan : "featured";
+
+    if (!form.contains(document.activeElement) && !form.elements.headline.value) {
+      form.elements.headline.value = promotion ? promotion.headline || "" : "";
+    }
+    form.elements.plan_slug.disabled = requestLocked;
+    form.elements.headline.disabled = requestLocked;
+    var submit = form.querySelector('button[type="submit"]');
+    if (submit) {
+      submit.disabled = requestLocked;
+      submit.innerHTML = requestLocked
+        ? '<i data-lucide="badge-check"></i>Promotion approved'
+        : '<i data-lucide="send"></i>' + (promotion && promotion.campaign_status === "requested" ? "Update request" : "Request plan");
+    }
+    ui.hydrateIcons();
+  }
 
   function getSessionStallId() {
     var session = store.getSession();
@@ -260,6 +369,10 @@
         return stall.id === sessionStall;
       })
       : [];
+    cache.promotionPlans = store.listPromotionPlans ? await store.listPromotionPlans() : [];
+    cache.promotions = store.listStallPromotions
+      ? await store.listStallPromotions({ stallId: sessionStall })
+      : [];
     cache.menuItems = await store.listMenuItems({ includeUnavailable: true, includeClosed: true });
     cache.orders = await store.listOrders();
 
@@ -277,6 +390,7 @@
     if (stats) stats.innerHTML = statsHtml();
     populateStallSelects();
     loadSelectedStallProfile();
+    renderPromotionPanel();
     renderOrders();
     renderMenuList();
   }
@@ -286,6 +400,7 @@
     var clear = ui.qs("#clear-menu-form");
     var menuForm = ui.qs("#menu-form");
     var stallForm = ui.qs("#staff-stall-form");
+    var promotionForm = ui.qs("#promotion-request-form");
 
     if (refresh) {
       refresh.addEventListener("click", function () {
@@ -317,6 +432,26 @@
           await renderAll();
         } catch (error) {
           ui.toast(error.message || "Unable to save stall information.", "error");
+        }
+      });
+    }
+
+    if (promotionForm) {
+      promotionForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var button = promotionForm.querySelector('button[type="submit"]');
+        if (button) button.disabled = true;
+        try {
+          await store.requestStallPromotion({
+            plan_slug: promotionForm.elements.plan_slug.value,
+            headline: promotionForm.elements.headline.value.trim()
+          });
+          ui.toast("Promotion request sent to the admin.");
+          await renderAll();
+        } catch (error) {
+          ui.toast(error.message || "Unable to request this promotion.", "error");
+        } finally {
+          if (button && !promotionIsApproved(activePromotion())) button.disabled = false;
         }
       });
     }

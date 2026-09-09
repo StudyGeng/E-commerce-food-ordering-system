@@ -39,8 +39,8 @@
     <section class="screen-header compact">
       <div>
         <p class="eyebrow">Stall dashboard</p>
-        <h1>Receive orders and manage stall food</h1>
-        <p>Local stall staff can see incoming orders, update status, edit stall information, change prices, and control stock availability.</p>
+        <h1>Receive orders, manage food, and grow your stall</h1>
+        <p>Handle incoming orders, update your menu and stock, or request a clearly labeled sponsored placement.</p>
       </div>
     </section>
 
@@ -63,6 +63,32 @@
       </div>
 
       <aside class="right-stack manager-panel">
+        <section class="content-panel promotion-request-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Promote your stall</p>
+              <h2>Featured &amp; Premium</h2>
+            </div>
+            <i class="panel-heading-icon" data-lucide="megaphone"></i>
+          </div>
+          <div id="staff-promotion-status"></div>
+          <form id="promotion-request-form" class="stack-form">
+            <label>
+              <span>Promotion plan</span>
+              <select name="plan_slug"></select>
+            </label>
+            <label>
+              <span>Sponsored headline</span>
+              <textarea name="headline" rows="2" maxlength="160" placeholder="Tell customers what makes your stall special"></textarea>
+            </label>
+            <button class="button full" type="submit">
+              <i data-lucide="send"></i>
+              Request plan
+            </button>
+          </form>
+          <p class="promotion-request-note">This is a demo request—no payment is collected here. An admin must confirm payment and activate the dates before customers see the ad.</p>
+        </section>
+
         <section class="content-panel">
           <div class="section-heading">
             <div>

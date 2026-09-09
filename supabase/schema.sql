@@ -36,6 +36,51 @@ create table if not exists public.stalls (
   updated_at timestamp with time zone default now()
 );
 
+create table if not exists public.promotion_plans (
+  slug text primary key check (slug in ('free', 'featured', 'premium')),
+  name text not null,
+  description text,
+  price_minor integer not null default 0 check (price_minor >= 0),
+  currency text not null default 'MYR' check (char_length(currency) = 3),
+  placement_priority integer not null default 0,
+  active boolean not null default true,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+create table if not exists public.stall_promotions (
+  stall_id uuid primary key references public.stalls(id) on delete cascade,
+  plan_slug text not null default 'free' references public.promotion_plans(slug),
+  campaign_status text not null default 'inactive'
+    check (campaign_status in ('inactive', 'requested', 'active', 'paused', 'ended', 'cancelled')),
+  payment_status text not null default 'pending'
+    check (payment_status in ('pending', 'paid', 'failed', 'refunded')),
+  headline text,
+  price_minor integer not null default 0 check (price_minor >= 0),
+  currency text not null default 'MYR' check (char_length(currency) = 3),
+  starts_at timestamp with time zone,
+  ends_at timestamp with time zone,
+  payment_reference text unique,
+  requested_at timestamp with time zone default now(),
+  paid_at timestamp with time zone,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now(),
+  constraint stall_promotions_valid_window check (
+    starts_at is null or ends_at is null or ends_at > starts_at
+  ),
+  constraint stall_promotions_active_requires_window check (
+    campaign_status <> 'active' or payment_status <> 'paid' or plan_slug = 'free' or
+    (starts_at is not null and ends_at is not null)
+  )
+);
+
+create table if not exists public.stall_popularity_metrics (
+  stall_id uuid primary key references public.stalls(id) on delete cascade,
+  completed_orders_30d bigint not null default 0 check (completed_orders_30d >= 0),
+  items_sold_30d bigint not null default 0 check (items_sold_30d >= 0),
+  refreshed_at timestamp with time zone not null default now()
+);
+
 alter table public.users
   drop constraint if exists users_assigned_stall_id_fkey;
 
@@ -130,6 +175,8 @@ create index if not exists idx_orders_table_code on public.orders(table_code);
 create index if not exists idx_order_items_order_id on public.order_items(order_id);
 create index if not exists idx_order_items_stall_id on public.order_items(stall_id);
 create index if not exists idx_payments_order_id on public.payments(order_id);
+create index if not exists idx_stall_promotions_active_window
+  on public.stall_promotions(campaign_status, payment_status, starts_at, ends_at);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -156,6 +203,16 @@ create trigger set_stalls_updated_at
   before update on public.stalls
   for each row execute function public.set_updated_at();
 
+drop trigger if exists set_promotion_plans_updated_at on public.promotion_plans;
+create trigger set_promotion_plans_updated_at
+  before update on public.promotion_plans
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists set_stall_promotions_updated_at on public.stall_promotions;
+create trigger set_stall_promotions_updated_at
+  before update on public.stall_promotions
+  for each row execute function public.set_updated_at();
+
 drop trigger if exists set_menu_items_updated_at on public.menu_items;
 create trigger set_menu_items_updated_at
   before update on public.menu_items
@@ -171,6 +228,20 @@ create trigger set_payments_updated_at
   before update on public.payments
   for each row execute function public.set_updated_at();
 
+insert into public.promotion_plans
+  (slug, name, description, price_minor, currency, placement_priority, active)
+values
+  ('free', 'Free', 'Standard organic listing in the food court.', 0, 'MYR', 0, true),
+  ('featured', 'Featured', 'Sponsored discovery placement above organic popular stalls.', 3900, 'MYR', 10, true),
+  ('premium', 'Premium', 'Highest-priority sponsored placement with a premium highlight.', 7900, 'MYR', 20, true)
+on conflict (slug) do update set
+  name = excluded.name,
+  description = excluded.description,
+  price_minor = excluded.price_minor,
+  currency = excluded.currency,
+  placement_priority = excluded.placement_priority,
+  active = excluded.active;
+
 insert into public.stalls (id, name, description, image_url, cuisine_type, rating, staff_id, wait_minutes, closed)
 values
   ('10000000-0000-4000-8000-000000000001', 'Nasi Corner', 'Comfort rice plates with quick lunch sets.', 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=900&q=80', 'Rice', 4.7, null, 12, false),
@@ -185,6 +256,27 @@ on conflict (id) do update set
   rating = excluded.rating,
   wait_minutes = excluded.wait_minutes,
   closed = excluded.closed;
+
+insert into public.stall_promotions
+  (stall_id, plan_slug, campaign_status, payment_status, headline, price_minor, currency,
+   starts_at, ends_at, payment_reference, requested_at, paid_at)
+values
+  ('10000000-0000-4000-8000-000000000001', 'premium', 'active', 'paid',
+   'Signature rice sets made for a satisfying lunch.', 7900, 'MYR', now(), now() + interval '30 days',
+   'DEMO-PREMIUM-001', '2026-01-09T09:00:00.000Z', '2026-01-09T09:00:00.000Z'),
+  ('10000000-0000-4000-8000-000000000004', 'featured', 'active', 'paid',
+   'Cool drinks and desserts delivered to your table.', 3900, 'MYR', now(), now() + interval '30 days',
+   'DEMO-FEATURED-001', '2026-01-09T09:15:00.000Z', '2026-01-09T09:15:00.000Z')
+on conflict (stall_id) do nothing;
+
+insert into public.stall_popularity_metrics
+  (stall_id, completed_orders_30d, items_sold_30d, refreshed_at)
+values
+  ('10000000-0000-4000-8000-000000000001', 146, 213, now()),
+  ('10000000-0000-4000-8000-000000000002', 121, 180, now()),
+  ('10000000-0000-4000-8000-000000000003', 98, 142, now()),
+  ('10000000-0000-4000-8000-000000000004', 84, 197, now())
+on conflict (stall_id) do nothing;
 
 insert into public.menu_items (id, stall_id, name, description, price, image_url, category, available, stock_quantity)
 values
@@ -227,18 +319,24 @@ on conflict (id) do update set
 alter table public.users enable row level security;
 alter table public.tables enable row level security;
 alter table public.stalls enable row level security;
+alter table public.promotion_plans enable row level security;
+alter table public.stall_promotions enable row level security;
+alter table public.stall_popularity_metrics enable row level security;
 alter table public.menu_items enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.payments enable row level security;
 
-revoke all on public.users, public.tables, public.stalls, public.menu_items,
+revoke all on public.users, public.tables, public.stalls, public.promotion_plans,
+  public.stall_promotions, public.stall_popularity_metrics, public.menu_items,
   public.orders, public.order_items, public.payments from anon, authenticated;
 
-grant select on public.tables, public.stalls, public.menu_items to anon, authenticated;
+grant select on public.tables, public.stalls, public.menu_items, public.promotion_plans to anon, authenticated;
+grant insert, update, delete on public.promotion_plans to authenticated;
 grant insert on public.orders, public.order_items, public.payments to anon, authenticated;
 grant select on public.orders, public.order_items, public.payments to anon, authenticated;
-grant select, insert, update, delete on public.users, public.tables, public.stalls, public.menu_items to authenticated;
+grant select, insert, update, delete on public.users, public.tables, public.stalls,
+  public.stall_promotions, public.stall_popularity_metrics, public.menu_items to authenticated;
 grant update (status, payment_status, pending_warning_at, auto_cancelled_at,
   cancellation_reason, stock_released_at, updated_at) on public.orders to authenticated;
 grant update (status, updated_at) on public.payments to authenticated;
@@ -270,9 +368,128 @@ revoke all on function public.is_admin() from public;
 revoke all on function public.assigned_stall() from public;
 grant execute on function public.is_admin(), public.assigned_stall() to authenticated;
 
+create or replace function public.request_stall_promotion(
+  requested_plan text,
+  requested_headline text default ''
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_stall uuid;
+  selected_plan public.promotion_plans%rowtype;
+begin
+  target_stall := public.assigned_stall();
+  if target_stall is null then
+    raise exception 'No stall is assigned to this account.';
+  end if;
+
+  select * into selected_plan
+  from public.promotion_plans
+  where slug = requested_plan and slug in ('featured', 'premium') and active = true;
+
+  if not found then
+    raise exception 'This promotion plan is not available.';
+  end if;
+
+  if exists (
+    select 1 from public.stall_promotions
+    where stall_id = target_stall
+      and plan_slug in ('featured', 'premium')
+      and campaign_status = 'active'
+      and payment_status = 'paid'
+      and (ends_at is null or ends_at > now())
+  ) then
+    raise exception 'This stall already has an active promotion.';
+  end if;
+
+  insert into public.stall_promotions (
+    stall_id, plan_slug, campaign_status, payment_status, headline,
+    price_minor, currency, starts_at, ends_at, payment_reference,
+    requested_at, paid_at, updated_at
+  ) values (
+    target_stall, selected_plan.slug, 'requested', 'pending', left(coalesce(requested_headline, ''), 160),
+    selected_plan.price_minor, selected_plan.currency, null, null, null,
+    now(), null, now()
+  )
+  on conflict (stall_id) do update set
+    plan_slug = excluded.plan_slug,
+    campaign_status = excluded.campaign_status,
+    payment_status = excluded.payment_status,
+    headline = excluded.headline,
+    price_minor = excluded.price_minor,
+    currency = excluded.currency,
+    starts_at = null,
+    ends_at = null,
+    payment_reference = null,
+    requested_at = now(),
+    paid_at = null,
+    updated_at = now();
+end;
+$$;
+
+create or replace function public.get_stall_discovery()
+returns table (
+  stall_id uuid,
+  is_sponsored boolean,
+  promotion_plan text,
+  promotion_headline text,
+  sponsor_rank integer,
+  recent_orders bigint,
+  recent_items bigint
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with active_promotions as (
+    select sp.stall_id, sp.plan_slug, sp.headline, pp.placement_priority
+    from public.stall_promotions sp
+    join public.promotion_plans pp on pp.slug = sp.plan_slug and pp.active = true
+    where sp.plan_slug in ('featured', 'premium')
+      and sp.campaign_status = 'active'
+      and sp.payment_status = 'paid'
+      and sp.starts_at is not null
+      and sp.ends_at is not null
+      and sp.starts_at <= now()
+      and sp.ends_at > now()
+  )
+  select
+    s.id as stall_id,
+    (ap.stall_id is not null) as is_sponsored,
+    ap.plan_slug as promotion_plan,
+    coalesce(ap.headline, '') as promotion_headline,
+    coalesce(ap.placement_priority, 0)::integer as sponsor_rank,
+    coalesce(pop.completed_orders_30d, 0)::bigint as recent_orders,
+    coalesce(pop.items_sold_30d, 0)::bigint as recent_items
+  from public.stalls s
+  left join active_promotions ap on ap.stall_id = s.id
+  left join public.stall_popularity_metrics pop
+    on pop.stall_id = s.id
+    and pop.refreshed_at >= now() - interval '48 hours'
+  where s.closed = false
+    and exists (
+      select 1 from public.menu_items mi
+      where mi.stall_id = s.id and mi.available = true and mi.stock_quantity > 0
+    );
+$$;
+
+revoke all on function public.request_stall_promotion(text, text) from public;
+revoke all on function public.get_stall_discovery() from public;
+grant execute on function public.request_stall_promotion(text, text) to authenticated;
+grant execute on function public.get_stall_discovery() to anon, authenticated;
+
 drop policy if exists "Prototype public access" on public.users;
 drop policy if exists "Prototype public access" on public.tables;
 drop policy if exists "Prototype public access" on public.stalls;
+drop policy if exists "Public reads promotion plans" on public.promotion_plans;
+drop policy if exists "Admins manage promotion plans" on public.promotion_plans;
+drop policy if exists "Staff read assigned promotion" on public.stall_promotions;
+drop policy if exists "Admins manage stall promotions" on public.stall_promotions;
+drop policy if exists "Admins manage popularity metrics" on public.stall_popularity_metrics;
 drop policy if exists "Prototype public access" on public.menu_items;
 drop policy if exists "Prototype public access" on public.orders;
 drop policy if exists "Prototype public access" on public.order_items;
@@ -318,6 +535,19 @@ create policy "Assigned staff update stall" on public.stalls for update to authe
 using (public.is_admin() or id = public.assigned_stall())
 with check (public.is_admin() or id = public.assigned_stall());
 
+create policy "Public reads promotion plans" on public.promotion_plans for select to anon, authenticated
+using (active = true);
+create policy "Admins manage promotion plans" on public.promotion_plans for all to authenticated
+using (public.is_admin()) with check (public.is_admin());
+
+create policy "Staff read assigned promotion" on public.stall_promotions for select to authenticated
+using (public.is_admin() or stall_id = public.assigned_stall());
+create policy "Admins manage stall promotions" on public.stall_promotions for all to authenticated
+using (public.is_admin()) with check (public.is_admin());
+
+create policy "Admins manage popularity metrics" on public.stall_popularity_metrics for all to authenticated
+using (public.is_admin()) with check (public.is_admin());
+
 create policy "Public reads menu" on public.menu_items for select to anon, authenticated using (true);
 create policy "Assigned staff create menu" on public.menu_items for insert to authenticated
 with check (public.is_admin() or stall_id = public.assigned_stall());
@@ -327,7 +557,8 @@ with check (public.is_admin() or stall_id = public.assigned_stall());
 create policy "Assigned staff delete menu" on public.menu_items for delete to authenticated
 using (public.is_admin() or stall_id = public.assigned_stall());
 
-create policy "Customers create orders" on public.orders for insert to anon, authenticated with check (true);
+create policy "Customers create orders" on public.orders for insert to anon, authenticated
+with check (status = 'Pending' and payment_status in ('Pending', 'Paid') and total_amount >= 0);
 create policy "Order tracking reads orders" on public.orders for select to anon, authenticated using (true);
 create policy "Assigned staff update orders" on public.orders for update to authenticated
 using (public.is_admin() or exists (

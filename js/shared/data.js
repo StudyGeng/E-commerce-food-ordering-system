@@ -67,6 +67,75 @@
         updated_at: "2026-01-09T09:15:00.000Z"
       }
     ],
+    promotion_plans: [
+      {
+        slug: "free",
+        name: "Free",
+        description: "Standard organic listing in the food court.",
+        price_minor: 0,
+        currency: "MYR",
+        placement_priority: 0,
+        active: true
+      },
+      {
+        slug: "featured",
+        name: "Featured",
+        description: "Sponsored discovery placement above organic popular stalls.",
+        price_minor: 3900,
+        currency: "MYR",
+        placement_priority: 10,
+        active: true
+      },
+      {
+        slug: "premium",
+        name: "Premium",
+        description: "Highest-priority sponsored placement with a premium highlight.",
+        price_minor: 7900,
+        currency: "MYR",
+        placement_priority: 20,
+        active: true
+      }
+    ],
+    stall_promotions: [
+      {
+        stall_id: "stall-rice",
+        plan_slug: "premium",
+        campaign_status: "active",
+        payment_status: "paid",
+        headline: "Signature rice sets made for a satisfying lunch.",
+        price_minor: 7900,
+        currency: "MYR",
+        starts_at: new Date(Date.now() - (2 * 24 * 60 * 60 * 1000)).toISOString(),
+        ends_at: new Date(Date.now() + (28 * 24 * 60 * 60 * 1000)).toISOString(),
+        payment_reference: "DEMO-PREMIUM-001",
+        requested_at: "2026-01-09T09:00:00.000Z",
+        paid_at: "2026-01-09T09:00:00.000Z",
+        created_at: "2026-01-09T09:00:00.000Z",
+        updated_at: "2026-01-09T09:00:00.000Z"
+      },
+      {
+        stall_id: "stall-drinks",
+        plan_slug: "featured",
+        campaign_status: "active",
+        payment_status: "paid",
+        headline: "Cool drinks and desserts delivered to your table.",
+        price_minor: 3900,
+        currency: "MYR",
+        starts_at: new Date(Date.now() - (5 * 24 * 60 * 60 * 1000)).toISOString(),
+        ends_at: new Date(Date.now() + (25 * 24 * 60 * 60 * 1000)).toISOString(),
+        payment_reference: "DEMO-FEATURED-001",
+        requested_at: "2026-01-09T09:15:00.000Z",
+        paid_at: "2026-01-09T09:15:00.000Z",
+        created_at: "2026-01-09T09:15:00.000Z",
+        updated_at: "2026-01-09T09:15:00.000Z"
+      }
+    ],
+    stall_popularity_metrics: [
+      { stall_id: "stall-rice", completed_orders_30d: 146, items_sold_30d: 213, refreshed_at: null },
+      { stall_id: "stall-noodle", completed_orders_30d: 121, items_sold_30d: 180, refreshed_at: null },
+      { stall_id: "stall-grill", completed_orders_30d: 98, items_sold_30d: 142, refreshed_at: null },
+      { stall_id: "stall-drinks", completed_orders_30d: 84, items_sold_30d: 197, refreshed_at: null }
+    ],
     menu_items: [
       {
         id: "item-chicken-rice",
