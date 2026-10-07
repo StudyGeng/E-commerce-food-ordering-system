@@ -35,8 +35,25 @@ Customers do not need an account to place an order.
 5. Mark the order as completed when it is ready.
 6. Manage the stall information, menu, prices, stock, and food availability.
 7. Request a Featured or Premium promotion plan for admin approval.
+8. On an active paid plan, record business expenses and review the analytics included in that tier.
 
 Each staff account can access only its assigned stall.
+
+## Stall Business Analytics
+
+The business calculator is deliberately tiered so the Free plan receives none of the new calculation feature:
+
+| Plan | Business tools |
+| --- | --- |
+| Free | No expense records, historical reporting, or business calculator. Orders, menu, stock, and stall profile remain available. |
+| Featured | Expense tracking plus revenue, net profit, profit margin, completed orders, items sold, average order value, and best seller, using quick date presets. Owners can send a Premium upgrade request without losing current Featured access. |
+| Premium | Everything in Featured plus custom date ranges, gross-profit detail, performance summaries, sales/profit and expense charts, private menu costs, and menu-item profitability. |
+
+Access begins only while a Featured or Premium subscription is paid, approved, enabled, and inside its scheduled start/end dates. The dashboard calculates revenue from completed, paid order items. In a multi-stall checkout, it includes only line items belonging to the signed-in stall, so another vendor's sales are never counted as that stall's revenue. Premium item-profit reports use private menu costs and cost snapshots captured when order items are created, so later menu-cost changes do not rewrite historical figures.
+
+Apply the latest [`supabase/schema.sql`](supabase/schema.sql) before using this module. It adds stall-scoped expenses, private menu and order-item cost tables, completion timestamps, entitlement functions, row-level security, and a transactional Premium menu-and-cost save function. Expense access requires Featured or Premium; private cost access requires Premium. If old demo promotion records have expired, reactivate their paid schedule from the admin dashboard before testing.
+
+Run `node scripts/test-business-entitlements.js`, `node scripts/test-business-store-security.js`, and `node scripts/test-business-analytics.js` to verify tier gating, private-data scoping, and the core multi-stall calculations. Bundled seed figures and browser `localStorage` are demonstration data only; real financial privacy and durable records require the Supabase schema and authenticated database policies.
 
 ## How Administrators Use the Web App
 

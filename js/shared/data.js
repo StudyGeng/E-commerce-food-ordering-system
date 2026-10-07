@@ -71,7 +71,7 @@
       {
         slug: "free",
         name: "Free",
-        description: "Standard organic listing in the food court.",
+        description: "Ordering, menu, stock, and profile tools without business calculation.",
         price_minor: 0,
         currency: "MYR",
         placement_priority: 0,
@@ -80,7 +80,7 @@
       {
         slug: "featured",
         name: "Featured",
-        description: "Sponsored discovery placement above organic popular stalls.",
+        description: "Sponsored discovery plus essential expense and profit calculation.",
         price_minor: 3900,
         currency: "MYR",
         placement_priority: 10,
@@ -89,7 +89,7 @@
       {
         slug: "premium",
         name: "Premium",
-        description: "Highest-priority sponsored placement with a premium highlight.",
+        description: "Highest-priority placement plus complete charts and menu profitability.",
         price_minor: 7900,
         currency: "MYR",
         placement_priority: 20,
@@ -294,6 +294,21 @@
         updated_at: "2026-01-09T09:41:00.000Z"
       }
     ],
+    menu_item_costs: [
+      { menu_item_id: "item-chicken-rice", stall_id: "stall-rice", estimated_cost: 3.2 },
+      { menu_item_id: "item-nasi-lemak", stall_id: "stall-rice", estimated_cost: 4.1 },
+      { menu_item_id: "item-curry-rice", stall_id: "stall-rice", estimated_cost: 3.6 },
+      { menu_item_id: "item-char-kuey-teow", stall_id: "stall-noodle", estimated_cost: 3.5 },
+      { menu_item_id: "item-pan-mee", stall_id: "stall-noodle", estimated_cost: 2.8 },
+      { menu_item_id: "item-laksa", stall_id: "stall-noodle", estimated_cost: 3.8 },
+      { menu_item_id: "item-beef-burger", stall_id: "stall-grill", estimated_cost: 5.2 },
+      { menu_item_id: "item-satay", stall_id: "stall-grill", estimated_cost: 4.2 },
+      { menu_item_id: "item-salad", stall_id: "stall-grill", estimated_cost: 4.0 },
+      { menu_item_id: "item-iced-tea", stall_id: "stall-drinks", estimated_cost: 0.8 },
+      { menu_item_id: "item-milk-tea", stall_id: "stall-drinks", estimated_cost: 1.8 },
+      { menu_item_id: "item-dessert", stall_id: "stall-drinks", estimated_cost: 2.5 }
+    ],
+    expenses: [],
     tables: [
       {
         id: "table-t01",
@@ -353,6 +368,7 @@
         payment_status: "Paid",
         payment_method: "Sandbox Card",
         transaction_id: "SBX-1001",
+        completed_at: null,
         created_at: "2026-01-09T10:10:00.000Z",
         updated_at: "2026-01-09T10:15:00.000Z"
       }
@@ -376,6 +392,10 @@
         price: 12.9,
         notes: ""
       }
+    ],
+    order_item_costs: [
+      { order_item_id: "orderitem-1001-a", stall_id: "stall-rice", unit_cost: 3.2, cost_source: "menu_cost_snapshot" },
+      { order_item_id: "orderitem-1001-b", stall_id: "stall-grill", unit_cost: 5.2, cost_source: "menu_cost_snapshot" }
     ],
     payments: [
       {

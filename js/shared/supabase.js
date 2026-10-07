@@ -21,8 +21,30 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function normalizeExpenseRecord(expense) {
+    var normalized = Object.assign({
+      description: "",
+      expense_name: "",
+      category: "",
+      expense_date: ""
+    }, expense || {});
+    normalized.amount = Math.max(0, safeNumber(normalized.amount));
+    return normalized;
+  }
+
   function makeId(prefix) {
     return prefix + "-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+  }
+
+  function makeUuid() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (character) {
+      var random = Math.floor(Math.random() * 16);
+      var value = character === "x" ? random : (random & 0x3) | 0x8;
+      return value.toString(16);
+    });
   }
 
   function historyRetentionMs() {
@@ -237,7 +259,9 @@
 
   function pruneExpiredOrders(state) {
     var orders = state.orders || [];
-    var freshOrders = orders.filter(isFreshOrder);
+    var freshOrders = orders.filter(function (order) {
+      return order.status === "Completed" || isFreshOrder(order);
+    });
     if (freshOrders.length === orders.length) return state;
 
     var keepOrderIds = freshOrders.reduce(function (ids, order) {
@@ -248,6 +272,13 @@
     state.orders = freshOrders;
     state.order_items = (state.order_items || []).filter(function (item) {
       return keepOrderIds[item.order_id];
+    });
+    var keepOrderItemIds = state.order_items.reduce(function (ids, item) {
+      ids[item.id] = true;
+      return ids;
+    }, {});
+    state.order_item_costs = (state.order_item_costs || []).filter(function (cost) {
+      return keepOrderItemIds[cost.order_item_id];
     });
     state.payments = (state.payments || []).filter(function (payment) {
       return keepOrderIds[payment.order_id];
@@ -267,9 +298,12 @@
       stall_promotions: clone(seed.stall_promotions || []),
       stall_popularity_metrics: clone(seed.stall_popularity_metrics || []),
       menu_items: clone(seed.menu_items || []),
+      menu_item_costs: clone(seed.menu_item_costs || []),
+      expenses: clone(seed.expenses || []),
       tables: clone(seed.tables || []),
       orders: clone(seed.orders || []),
       order_items: clone(seed.order_items || []),
+      order_item_costs: clone(seed.order_item_costs || []),
       payments: clone(seed.payments || []),
       events: clone(seed.events || [])
     };
@@ -278,6 +312,7 @@
   function normalizeState(state) {
     var fresh = initialState();
     var next = Object.assign({}, fresh, state || {});
+    var hadStoredMenuItemCosts = Boolean(state && Array.isArray(state.menu_item_costs));
 
     next.users = (next.users || []).map(function (user) {
       var seedUser = fresh.users.find(function (entry) {
@@ -305,18 +340,57 @@
         price_minor: 0,
         currency: "MYR",
         starts_at: null,
-        ends_at: null
+        ends_at: null,
+        upgrade_requested_plan: null,
+        upgrade_requested_at: null
       }, promotion);
     });
     next.stall_popularity_metrics = (next.stall_popularity_metrics && next.stall_popularity_metrics.length)
       ? next.stall_popularity_metrics
       : fresh.stall_popularity_metrics;
 
+    next.menu_item_costs = (Array.isArray(next.menu_item_costs) ? next.menu_item_costs : fresh.menu_item_costs).map(function (cost) {
+      return Object.assign({}, cost, { estimated_cost: Math.max(0, safeNumber(cost.estimated_cost)) });
+    });
     next.menu_items = (next.menu_items || []).map(function (item) {
       var seedItem = fresh.menu_items.find(function (entry) {
         return entry.id === item.id;
       }) || {};
-      return Object.assign({ stock_quantity: 10, available: true }, seedItem, item);
+      var legacyCost = Object.prototype.hasOwnProperty.call(item, "estimated_cost")
+        ? Math.max(0, safeNumber(item.estimated_cost))
+        : null;
+      var normalized = Object.assign({ stock_quantity: 10, available: true }, seedItem, item);
+      delete normalized.estimated_cost;
+      if (legacyCost !== null) {
+        var migratedCost = next.menu_item_costs.find(function (cost) {
+          return cost.menu_item_id === item.id;
+        });
+        if (migratedCost && !hadStoredMenuItemCosts) {
+          migratedCost.stall_id = item.stall_id;
+          migratedCost.estimated_cost = legacyCost;
+        } else if (!migratedCost) {
+          next.menu_item_costs.push({
+            menu_item_id: item.id,
+            stall_id: item.stall_id,
+            estimated_cost: legacyCost
+          });
+        }
+      }
+      return normalized;
+    });
+
+    next.expenses = (Array.isArray(next.expenses) ? next.expenses : fresh.expenses).map(normalizeExpenseRecord);
+    next.order_item_costs = (Array.isArray(next.order_item_costs) ? next.order_item_costs : fresh.order_item_costs).map(function (cost) {
+      return Object.assign({}, cost, { unit_cost: Math.max(0, safeNumber(cost.unit_cost)) });
+    });
+
+    next.orders = (next.orders || []).map(function (order) {
+      var normalized = Object.assign({ completed_at: null }, order);
+      if (normalized.status === "Completed" && !normalized.completed_at) {
+        normalized.completed_at = normalized.updated_at || normalized.created_at || null;
+      }
+      if (normalized.status !== "Completed") normalized.completed_at = null;
+      return normalized;
     });
 
     next.tables = next.tables && next.tables.length ? next.tables : fresh.tables;
@@ -456,6 +530,45 @@
     return startsAt <= timestamp && timestamp < endsAt;
   }
 
+  function localBusinessTier(state, stallId) {
+    var session = getSession();
+    if (session && session.role === "admin") return "premium";
+    if (!session || session.role !== "staff" || !stallId || session.assigned_stall_id !== stallId) {
+      return "free";
+    }
+
+    // A configured deployment must use its server-side entitlement records. It
+    // must never inherit a paid tier from bundled demo data while offline.
+    if (promotionRemoteConfigured) return "free";
+
+    var promotion = (state.stall_promotions || []).find(function (entry) {
+      return entry.stall_id === stallId;
+    });
+    if (!promotionIsLive(promotion)) return "free";
+    var enabledPlan = (state.promotion_plans || []).some(function (plan) {
+      return plan.slug === promotion.plan_slug && plan.active !== false;
+    });
+    if (!enabledPlan) return "free";
+    return promotion.plan_slug === "premium" ? "premium" : "featured";
+  }
+
+  function assertLocalBusinessAccess(state, stallId, premiumOnly) {
+    var session = getSession();
+    if (session && session.role === "admin") return;
+    var tier = localBusinessTier(state, stallId);
+    if (premiumOnly ? tier !== "premium" : tier === "free") {
+      throw new Error(premiumOnly
+        ? "An active Premium plan is required for menu costing."
+        : "An active Featured or Premium plan is required for business calculations.");
+    }
+  }
+
+  function financialRequestError(error, fallbackMessage) {
+    if (error && isNetworkError(error)) noteRemoteError(error);
+    else if (error) console.warn(error);
+    return new Error(fallbackMessage || (error && error.message) || "Financial data is unavailable.");
+  }
+
   function localStallDiscovery(includeSponsored) {
     var state = getState();
 
@@ -497,11 +610,12 @@
       if (!remote.error && remote.data) return remote.data;
       if (!isNetworkError(remote.error)) {
         console.warn(remote.error);
-        var fallbackPlans = clone(seed.promotion_plans || []);
-        return options.includeInactive ? fallbackPlans : fallbackPlans.filter(function (plan) { return plan.active; });
+        return [];
       }
       noteRemoteError(remote.error);
     }
+
+    if (promotionRemoteConfigured) return [];
 
     var plans = clone(getState().promotion_plans || []);
     if (!options.includeInactive) {
@@ -599,6 +713,12 @@
       paid_at: payload.payment_status === "paid" ? (payload.paid_at || now()) : null,
       updated_at: now()
     };
+    if (Object.prototype.hasOwnProperty.call(payload, "upgrade_requested_plan")) {
+      clean.upgrade_requested_plan = payload.upgrade_requested_plan || null;
+      clean.upgrade_requested_at = payload.upgrade_requested_plan
+        ? payload.upgrade_requested_at || now()
+        : null;
+    }
 
     if (clean.plan_slug === "free") {
       clean.campaign_status = "inactive";
@@ -716,12 +836,60 @@
       headline: headline,
       price_minor: plan.price_minor,
       currency: plan.currency,
-      requested_at: now()
+      requested_at: now(),
+      upgrade_requested_plan: null,
+      upgrade_requested_at: null
     });
     return true;
   }
 
-  function hydrateOrders(orders, orderItems, menuItems, stalls) {
+  async function requestStallUpgrade(planSlug) {
+    if (planSlug !== "premium") throw new Error("Only the Premium upgrade is available.");
+
+    if (promotionRemoteConfigured) {
+      if (!client || !canUseRemote()) {
+        throw new Error("Upgrade service is unavailable; nothing was requested.");
+      }
+      var remote;
+      try {
+        remote = await client.rpc("request_stall_upgrade", { requested_plan: planSlug });
+      } catch (error) {
+        if (isNetworkError(error)) noteRemoteError(error);
+        throw new Error("Upgrade service is unavailable; nothing was requested.");
+      }
+      if (!remote.error) return true;
+      if (isNetworkError(remote.error)) {
+        noteRemoteError(remote.error);
+        throw new Error("Upgrade service is unavailable; nothing was requested.");
+      }
+      throw new Error((remote.error && remote.error.message) || "Premium upgrade could not be requested.");
+    }
+
+    var session = getSession();
+    var stallId = session && session.role === "staff" ? session.assigned_stall_id : null;
+    if (!stallId) throw new Error("No stall is assigned to this account.");
+    var state = getState();
+    var premiumPlan = (state.promotion_plans || []).find(function (plan) {
+      return plan.slug === "premium" && plan.active;
+    });
+    var featuredPlan = (state.promotion_plans || []).find(function (plan) {
+      return plan.slug === "featured" && plan.active;
+    });
+    var promotion = (state.stall_promotions || []).find(function (entry) {
+      return entry.stall_id === stallId;
+    });
+    if (!premiumPlan) throw new Error("The Premium plan is not available.");
+    if (!featuredPlan || !promotion || promotion.plan_slug !== "featured" || !promotionIsLive(promotion)) {
+      throw new Error("Only an active Featured plan can request this upgrade.");
+    }
+    promotion.upgrade_requested_plan = "premium";
+    promotion.upgrade_requested_at = now();
+    promotion.updated_at = now();
+    saveState(state);
+    return true;
+  }
+
+  function hydrateOrders(orders, orderItems, menuItems, stalls, orderItemCosts, costStallId) {
     return orders.map(function (order) {
       var items = orderItems
         .filter(function (item) {
@@ -734,10 +902,20 @@
           var stall = stalls.find(function (record) {
             return record.id === item.stall_id;
           });
-          return Object.assign({}, item, {
+          var hydrated = Object.assign({}, item, {
             menu_item: menuItem || null,
             stall: stall || null
           });
+          if (costStallId !== null && (!costStallId || item.stall_id === costStallId)) {
+            var cost = (orderItemCosts || []).find(function (entry) {
+              return entry.order_item_id === item.id;
+            });
+            if (cost) {
+              hydrated.unit_cost_snapshot = Math.max(0, safeNumber(cost.unit_cost));
+              hydrated.cost_source = cost.cost_source || "menu_cost_snapshot";
+            }
+          }
+          return hydrated;
         });
 
       return Object.assign({}, order, { items: items });
@@ -787,14 +965,44 @@
       if (!result.error && result.data) {
         var unfiltered = !query && stallId === "all" && category === "all";
         if (!unfiltered || shouldUseRemoteRows(result.data, seed.menu_items, "menu items")) {
-          return result.data;
+          var remoteItems = result.data;
+          if (options.includeCosts) {
+            var session = getSession();
+            if (!session || ["staff", "admin"].indexOf(session.role) === -1) {
+              throw new Error("Staff or admin access is required for menu costing.");
+            }
+            var costScope = session.role === "staff" ? session.assigned_stall_id : (stallId !== "all" ? stallId : "");
+            var costQuery = client.from("menu_item_costs").select("menu_item_id, stall_id, estimated_cost");
+            if (costScope) costQuery = costQuery.eq("stall_id", costScope);
+            var costResult;
+            try {
+              costResult = await costQuery;
+            } catch (error) {
+              throw financialRequestError(error, "Private menu costs are unavailable; no cost data was shown.");
+            }
+            if (costResult.error) {
+              throw financialRequestError(costResult.error, "Private menu costs are unavailable; no cost data was shown.");
+            }
+            var costsByItem = (costResult.data || []).reduce(function (lookup, cost) {
+              lookup[cost.menu_item_id] = Math.max(0, safeNumber(cost.estimated_cost));
+              return lookup;
+            }, {});
+            remoteItems = remoteItems.map(function (item) {
+              var copy = Object.assign({}, item);
+              if (Object.prototype.hasOwnProperty.call(costsByItem, item.id)) {
+                copy.estimated_cost = costsByItem[item.id];
+              }
+              return copy;
+            });
+          }
+          return remoteItems;
         }
       }
       noteRemoteError(result.error);
     }
 
     var state = getState();
-    return state.menu_items.filter(function (item) {
+    var localItems = state.menu_items.filter(function (item) {
       var stall = state.stalls.find(function (record) {
         return record.id === item.stall_id;
       });
@@ -806,6 +1014,90 @@
       var stallIsOpen = !stall || !stall.closed || options.includeClosed;
       var matchesAvailability = options.includeUnavailable || (item.available && inStock);
       return matchesQuery && matchesStall && matchesCategory && matchesAvailability && stallIsOpen;
+    });
+    return localItems.map(function (item) {
+      var copy = Object.assign({}, item);
+      delete copy.estimated_cost;
+      if (options.includeCosts && localBusinessTier(state, item.stall_id) === "premium") {
+        var cost = (state.menu_item_costs || []).find(function (entry) {
+          return entry.menu_item_id === item.id && entry.stall_id === item.stall_id;
+        });
+        if (cost) copy.estimated_cost = Math.max(0, safeNumber(cost.estimated_cost));
+      }
+      return copy;
+    });
+  }
+
+  function expenseStallScope(requestedStallId) {
+    var session = getSession();
+    var requested = requestedStallId && requestedStallId !== "all"
+      ? String(requestedStallId)
+      : "";
+
+    if (!session || ["staff", "admin"].indexOf(session.role) === -1) {
+      throw new Error("Staff or admin access is required.");
+    }
+
+    if (session.role === "admin") return requested;
+    if (!session.assigned_stall_id) throw new Error("No stall is assigned to this account.");
+    if (requested && requested !== session.assigned_stall_id) {
+      throw new Error("You can only manage expenses for your assigned stall.");
+    }
+    return session.assigned_stall_id;
+  }
+
+  async function listExpenses(filters) {
+    var options = filters || {};
+    var stallId = expenseStallScope(options.stallId);
+
+    if (promotionRemoteConfigured) {
+      if (!canUseRemote()) {
+        throw new Error("Financial data is unavailable while the database is offline.");
+      }
+      var expenseRows = [];
+      var expenseOffset = 0;
+      var expenseCount = null;
+      var pageSize = 1000;
+      while (expenseCount === null || expenseRows.length < expenseCount) {
+        var remote = client
+          .from("expenses")
+          .select("*", { count: "exact" })
+          .order("expense_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true });
+        if (stallId) remote = remote.eq("stall_id", stallId);
+        var result;
+        try {
+          result = await remote.range(expenseOffset, expenseOffset + pageSize - 1);
+        } catch (error) {
+          throw financialRequestError(error, "Financial data could not be loaded from the database.");
+        }
+        if (result.error || !result.data) {
+          throw financialRequestError(result.error, "Financial data could not be loaded from the database.");
+        }
+        if (expenseCount === null && result.count !== null && result.count !== undefined &&
+          Number.isFinite(Number(result.count))) {
+          expenseCount = Number(result.count);
+        }
+        if (!result.data.length) break;
+        expenseRows = expenseRows.concat(result.data);
+        expenseOffset += result.data.length;
+      }
+      return expenseRows.map(normalizeExpenseRecord);
+    }
+
+    var state = getState();
+    if (stallId) assertLocalBusinessAccess(state, stallId, false);
+    var expenses = clone(state.expenses || []).map(normalizeExpenseRecord);
+    if (stallId) {
+      expenses = expenses.filter(function (expense) {
+        return expense.stall_id === stallId;
+      });
+    }
+    return expenses.sort(function (a, b) {
+      var dateOrder = String(b.expense_date || "").localeCompare(String(a.expense_date || ""));
+      if (dateOrder) return dateOrder;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
     });
   }
 
@@ -827,33 +1119,88 @@
     options.tableCode = tableCode;
 
     if (canUseRemote()) {
-      var remote = client
-        .from("orders")
-        .select("*, order_items(*, menu_items(name, image_url), stalls(name))")
-        .order("created_at", { ascending: false });
-
-      if (options.customerId && uuidPattern.test(options.customerId)) {
-        remote = remote.eq("customer_id", options.customerId);
+      var orderItemFields = options.includeCosts
+        ? "*, menu_items(name, image_url), stalls(name), order_item_costs(unit_cost, cost_source)"
+        : "*, menu_items(name, image_url), stalls(name)";
+      var orderSelect = "*, " + (options.stallId ? "order_items!inner(" : "order_items(") + orderItemFields + ")";
+      var serviceDayStartIso = "";
+      if (options.operationalOnly) {
+        var serviceDayStart = new Date();
+        serviceDayStart.setHours(0, 0, 0, 0);
+        serviceDayStartIso = serviceDayStart.toISOString();
       }
-      if (tableCode) {
-        remote = remote.eq("table_code", tableCode);
-      }
+      var remoteRows = [];
+      var orderOffset = 0;
+      var orderCount = null;
+      var orderPageSize = 1000;
+      var orderResult;
+      do {
+        var remote = client
+          .from("orders")
+          .select(orderSelect, { count: "exact" })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true });
+        if (options.customerId && uuidPattern.test(options.customerId)) {
+          remote = remote.eq("customer_id", options.customerId);
+        }
+        if (tableCode) remote = remote.eq("table_code", tableCode);
+        if (options.stallId) remote = remote.eq("order_items.stall_id", options.stallId);
+        if (serviceDayStartIso) remote = remote.gte("updated_at", serviceDayStartIso);
+        try {
+          orderResult = await remote.range(orderOffset, orderOffset + orderPageSize - 1);
+        } catch (error) {
+          orderResult = { error: error, data: null };
+        }
+        if (orderResult.error || !orderResult.data) break;
+        if (orderCount === null && orderResult.count !== null && orderResult.count !== undefined &&
+          Number.isFinite(Number(orderResult.count))) {
+          orderCount = Number(orderResult.count);
+        }
+        if (!orderResult.data.length) break;
+        remoteRows = remoteRows.concat(orderResult.data);
+        orderOffset += orderResult.data.length;
+      } while ((orderCount !== null && remoteRows.length < orderCount) ||
+        (orderCount === null && orderResult.data.length > 0));
 
-      remote = await remote;
-
-      if (!remote.error && remote.data) {
-        var remoteOrders = remote.data.map(function (order) {
-          var items = order.order_items || [];
+      if (!orderResult.error && orderResult.data) {
+        var remoteOrders = remoteRows.map(function (order) {
+          var items = (order.order_items || []).map(function (item) {
+            var copy = Object.assign({}, item);
+            var rawCost = copy.order_item_costs;
+            var cost = Array.isArray(rawCost) ? rawCost[0] : rawCost;
+            delete copy.order_item_costs;
+            if (options.includeCosts && cost) {
+              copy.unit_cost_snapshot = Math.max(0, safeNumber(cost.unit_cost));
+              copy.cost_source = cost.cost_source || "menu_cost_snapshot";
+            }
+            return copy;
+          });
           return Object.assign({}, order, { items: items });
         });
         remoteOrders = await applyRemotePendingOrderRules(remoteOrders);
+        if (options.operationalOnly) remoteOrders = remoteOrders.filter(isFreshOrder);
         return applyCustomerHistoryLimit(remoteOrders, options);
       }
-      noteRemoteError(remote.error);
+      noteRemoteError(orderResult.error);
     }
 
     var state = getState();
-    var orders = hydrateOrders(state.orders, state.order_items, state.menu_items, state.stalls);
+    var localSession = getSession();
+    var localCostStallId = null;
+    if (options.includeCosts && localSession && localSession.role === "admin") {
+      localCostStallId = "";
+    } else if (options.includeCosts && localSession && localSession.role === "staff" &&
+      localBusinessTier(state, localSession.assigned_stall_id) === "premium") {
+      localCostStallId = localSession.assigned_stall_id;
+    }
+    var orders = hydrateOrders(
+      state.orders,
+      state.order_items,
+      state.menu_items,
+      state.stalls,
+      state.order_item_costs,
+      localCostStallId
+    );
     if (options.customerId) {
       orders = orders.filter(function (order) {
         return order.customer_id === options.customerId;
@@ -864,8 +1211,20 @@
         return normalizeTableCode(order.table_code) === tableCode;
       });
     }
+    if (options.stallId) {
+      orders = orders.map(function (order) {
+        return Object.assign({}, order, {
+          items: (order.items || []).filter(function (item) {
+            return item.stall_id === options.stallId;
+          })
+        });
+      }).filter(function (order) {
+        return order.items.length > 0;
+      });
+    }
 
     orders = applyCustomerHistoryLimit(orders, options);
+    if (options.operationalOnly) orders = orders.filter(isFreshOrder);
 
     return orders.sort(function (a, b) {
       return new Date(b.created_at) - new Date(a.created_at);
@@ -1167,6 +1526,7 @@
       payment_status: paymentMethod === "Pay at Counter" ? "Pending" : "Paid",
       payment_method: paymentMethod,
       transaction_id: transactionId,
+      completed_at: null,
       created_at: created,
       updated_at: created
     };
@@ -1182,7 +1542,7 @@
         menuItem.updated_at = created;
       }
 
-      state.order_items.push({
+      var orderItem = {
         id: makeId("orderitem"),
         order_id: orderId,
         menu_item_id: entry.item.id,
@@ -1190,6 +1550,19 @@
         quantity: entry.quantity,
         price: safeNumber(entry.item.price),
         notes: entry.notes || ""
+      };
+      state.order_items.push(orderItem);
+
+      var privateCost = (state.menu_item_costs || []).find(function (cost) {
+        return cost.menu_item_id === entry.item.id && cost.stall_id === entry.item.stall_id;
+      });
+      state.order_item_costs = state.order_item_costs || [];
+      state.order_item_costs.push({
+        order_item_id: orderItem.id,
+        stall_id: entry.item.stall_id,
+        unit_cost: Math.max(0, safeNumber(privateCost && privateCost.estimated_cost)),
+        cost_source: "menu_cost_snapshot",
+        captured_at: created
       });
     });
 
@@ -1291,10 +1664,11 @@
   }
 
   async function updateOrderStatus(orderId, status) {
+    var changedAt = now();
     if (canUseRemote()) {
       var remote = await client
         .from("orders")
-        .update({ status: status, updated_at: now() })
+        .update({ status: status, updated_at: changedAt })
         .eq("id", orderId)
         .select("*")
         .single();
@@ -1308,7 +1682,8 @@
     });
     if (order) {
       order.status = status;
-      order.updated_at = now();
+      order.completed_at = status === "Completed" ? changedAt : null;
+      order.updated_at = changedAt;
       saveState(state);
     }
     return order;
@@ -1353,6 +1728,7 @@
   }
 
   async function saveMenuItem(payload) {
+    var hasEstimatedCost = Object.prototype.hasOwnProperty.call(payload || {}, "estimated_cost");
     var clean = {
       stall_id: payload.stall_id,
       name: payload.name,
@@ -1365,33 +1741,96 @@
       updated_at: now()
     };
 
+    if (hasEstimatedCost && promotionRemoteConfigured && !canUseRemote()) {
+      throw new Error("Private menu costs cannot be saved while the database is offline.");
+    }
+
+    if (hasEstimatedCost && promotionRemoteConfigured) {
+      var premiumItemId = payload.id || makeUuid();
+      if (!uuidPattern.test(premiumItemId)) {
+        throw new Error("This menu item must be reloaded before its private cost can be saved.");
+      }
+      var premiumSave;
+      try {
+        premiumSave = await client.rpc("save_premium_menu_item", {
+          requested_item_id: premiumItemId,
+          requested_stall_id: clean.stall_id,
+          requested_name: clean.name,
+          requested_description: clean.description,
+          requested_price: clean.price,
+          requested_image_url: clean.image_url,
+          requested_category: clean.category,
+          requested_available: clean.available,
+          requested_stock_quantity: clean.stock_quantity,
+          requested_estimated_cost: Math.max(0, safeNumber(payload.estimated_cost))
+        });
+      } catch (error) {
+        var premiumNetworkError = financialRequestError(error, "The menu item and private cost could not be saved together.");
+        premiumNetworkError.savedMenuItemId = premiumItemId;
+        throw premiumNetworkError;
+      }
+      if (premiumSave.error || !premiumSave.data) {
+        var premiumError = financialRequestError(premiumSave.error, "The menu item and private cost could not be saved together.");
+        premiumError.savedMenuItemId = premiumItemId;
+        throw premiumError;
+      }
+      var premiumRow = Array.isArray(premiumSave.data) ? premiumSave.data[0] : premiumSave.data;
+      return Object.assign({}, premiumRow, {
+        estimated_cost: Math.max(0, safeNumber(payload.estimated_cost))
+      });
+    }
+
     if (canUseRemote()) {
       if (payload.id) {
         var updated = await client.from("menu_items").update(clean).eq("id", payload.id).select("*").single();
         if (!updated.error && updated.data) return updated.data;
-        noteRemoteError(updated.error);
+        else noteRemoteError(updated.error);
       } else {
         clean.created_at = now();
         var created = await client.from("menu_items").insert(clean).select("*").single();
         if (!created.error && created.data) return created.data;
-        noteRemoteError(created.error);
+        else noteRemoteError(created.error);
       }
     }
 
     var state = getState();
+    if (hasEstimatedCost) assertLocalBusinessAccess(state, clean.stall_id, true);
+    var localEstimatedCost = Math.max(0, safeNumber(payload.estimated_cost));
+    var item;
     if (payload.id) {
-      var existing = state.menu_items.find(function (item) {
-        return item.id === payload.id;
+      item = state.menu_items.find(function (entry) {
+        return entry.id === payload.id;
       });
-      if (existing) Object.assign(existing, clean);
-      saveState(state);
-      return existing;
+      if (!item) throw new Error("Menu item not found.");
+      Object.assign(item, clean);
+    } else {
+      item = Object.assign({ id: makeId("item"), created_at: now() }, clean);
+      state.menu_items.push(item);
     }
 
-    var item = Object.assign({ id: makeId("item"), created_at: now() }, clean);
-    state.menu_items.push(item);
+    if (hasEstimatedCost) {
+      state.menu_item_costs = state.menu_item_costs || [];
+      var localCost = state.menu_item_costs.find(function (entry) {
+        return entry.menu_item_id === item.id;
+      });
+      if (localCost) {
+        localCost.stall_id = item.stall_id;
+        localCost.estimated_cost = localEstimatedCost;
+        localCost.updated_at = now();
+      } else {
+        state.menu_item_costs.push({
+          menu_item_id: item.id,
+          stall_id: item.stall_id,
+          estimated_cost: localEstimatedCost,
+          created_at: now(),
+          updated_at: now()
+        });
+      }
+    }
     saveState(state);
-    return item;
+    return hasEstimatedCost
+      ? Object.assign({}, item, { estimated_cost: localEstimatedCost })
+      : item;
   }
 
   async function deleteMenuItem(itemId) {
@@ -1404,6 +1843,122 @@
     var state = getState();
     state.menu_items = state.menu_items.filter(function (item) {
       return item.id !== itemId;
+    });
+    state.menu_item_costs = (state.menu_item_costs || []).filter(function (cost) {
+      return cost.menu_item_id !== itemId;
+    });
+    saveState(state);
+    return true;
+  }
+
+  function validExpenseDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    var parsed = new Date(value + "T00:00:00.000Z");
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }
+
+  async function saveExpense(payload) {
+    var input = payload || {};
+    var stallId = String(input.stall_id || "").trim();
+    var expenseName = String(input.expense_name || "").trim();
+    var category = String(input.category || "").trim();
+    var expenseDate = String(input.expense_date || "").trim();
+    var amount = Number(input.amount);
+
+    if (!stallId) throw new Error("Choose a stall for this expense.");
+    if (!expenseName) throw new Error("Enter an expense name.");
+    if (!category) throw new Error("Choose an expense category.");
+    if (!expenseDate) throw new Error("Choose an expense date.");
+    if (!validExpenseDate(expenseDate)) throw new Error("Enter a valid expense date.");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Expense amount must be greater than zero.");
+
+    amount = Number(amount.toFixed(2));
+    if (amount <= 0) throw new Error("Expense amount must be at least 0.01.");
+    stallId = expenseStallScope(stallId);
+
+    var clean = {
+      stall_id: stallId,
+      expense_name: expenseName,
+      category: category,
+      amount: amount,
+      description: String(input.description || "").trim(),
+      expense_date: expenseDate,
+      updated_at: now()
+    };
+
+    if (promotionRemoteConfigured) {
+      if (!canUseRemote()) {
+        throw new Error("This expense was not saved because the database is offline.");
+      }
+      if (input.id) {
+        var updated;
+        try {
+          updated = await client.from("expenses").update(clean).eq("id", input.id).select("*").single();
+        } catch (error) {
+          throw financialRequestError(error, "This expense could not be saved to the database.");
+        }
+        if (!updated.error && updated.data) return normalizeExpenseRecord(updated.data);
+        throw financialRequestError(updated.error, "This expense could not be saved to the database.");
+      } else {
+        clean.created_at = now();
+        var created;
+        try {
+          created = await client.from("expenses").insert(clean).select("*").single();
+        } catch (error) {
+          throw financialRequestError(error, "This expense could not be saved to the database.");
+        }
+        if (!created.error && created.data) return normalizeExpenseRecord(created.data);
+        throw financialRequestError(created.error, "This expense could not be saved to the database.");
+      }
+    }
+
+    var state = getState();
+    assertLocalBusinessAccess(state, stallId, false);
+    if (input.id) {
+      var existing = (state.expenses || []).find(function (expense) {
+        return expense.id === input.id;
+      });
+      if (!existing) throw new Error("Expense not found.");
+      expenseStallScope(existing.stall_id);
+      Object.assign(existing, clean);
+      saveState(state);
+      return clone(normalizeExpenseRecord(existing));
+    }
+
+    var expense = Object.assign({ id: makeId("expense"), created_at: now() }, clean);
+    state.expenses = state.expenses || [];
+    state.expenses.push(expense);
+    saveState(state);
+    return clone(normalizeExpenseRecord(expense));
+  }
+
+  async function deleteExpense(expenseId) {
+    if (!expenseId) throw new Error("Choose an expense to delete.");
+    expenseStallScope("");
+
+    if (promotionRemoteConfigured) {
+      if (!canUseRemote()) {
+        throw new Error("This expense was not deleted because the database is offline.");
+      }
+      var remote;
+      try {
+        remote = await client.from("expenses").delete().eq("id", expenseId);
+      } catch (error) {
+        throw financialRequestError(error, "This expense could not be deleted from the database.");
+      }
+      if (!remote.error) return true;
+      throw financialRequestError(remote.error, "This expense could not be deleted from the database.");
+    }
+
+    var state = getState();
+    var existing = (state.expenses || []).find(function (expense) {
+      return expense.id === expenseId;
+    });
+    if (!existing) return true;
+    expenseStallScope(existing.stall_id);
+    assertLocalBusinessAccess(state, existing.stall_id, false);
+    state.expenses = state.expenses.filter(function (expense) {
+      return expense.id !== expenseId;
     });
     saveState(state);
     return true;
@@ -1470,6 +2025,15 @@
     });
     state.menu_items = state.menu_items.filter(function (item) {
       return item.stall_id !== stallId;
+    });
+    state.menu_item_costs = (state.menu_item_costs || []).filter(function (cost) {
+      return cost.stall_id !== stallId;
+    });
+    state.order_item_costs = (state.order_item_costs || []).filter(function (cost) {
+      return cost.stall_id !== stallId;
+    });
+    state.expenses = (state.expenses || []).filter(function (expense) {
+      return expense.stall_id !== stallId;
     });
     saveState(state);
     return true;
@@ -1611,6 +2175,7 @@
     listStallPromotions: listStallPromotions,
     listStallDiscovery: listStallDiscovery,
     listMenuItems: listMenuItems,
+    listExpenses: listExpenses,
     listUsers: listUsers,
     listOrders: listOrders,
     listOrderEvents: listOrderEvents,
@@ -1635,9 +2200,12 @@
     markOrderPaid: markOrderPaid,
     saveMenuItem: saveMenuItem,
     deleteMenuItem: deleteMenuItem,
+    saveExpense: saveExpense,
+    deleteExpense: deleteExpense,
     saveStall: saveStall,
     saveStallPromotion: saveStallPromotion,
     requestStallPromotion: requestStallPromotion,
+    requestStallUpgrade: requestStallUpgrade,
     deleteStall: deleteStall,
     toggleStallClosed: toggleStallClosed,
     saveUser: saveUser

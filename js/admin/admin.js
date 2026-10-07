@@ -51,6 +51,9 @@
 
   function promotionState(promotion) {
     if (!promotion || promotion.plan_slug === "free") return { label: "Organic", className: "" };
+    if (promotion.upgrade_requested_plan === "premium") {
+      return { label: "Premium upgrade requested", className: "gold" };
+    }
     if (promotion.payment_status === "failed" || promotion.payment_status === "refunded") {
       return { label: promotion.payment_status === "refunded" ? "Refunded" : "Payment failed", className: "status-failed" };
     }
@@ -74,6 +77,7 @@
 
   function adminStallPriority(stall) {
     var promotion = promotionFor(stall.id);
+    if (promotion && promotion.upgrade_requested_plan === "premium") return 0;
     if (promotion && promotion.plan_slug !== "free" &&
         (promotion.campaign_status === "requested" || promotion.payment_status === "pending")) return 0;
     if (promotionIsLive(promotion)) return 1;
@@ -107,7 +111,9 @@
     }).length;
     var activePromotions = cache.promotions.filter(promotionIsLive).length;
     var promotionRequests = cache.promotions.filter(function (promotion) {
-      return promotion.campaign_status === "requested" || promotion.payment_status === "pending" && promotion.plan_slug !== "free";
+      return promotion.upgrade_requested_plan === "premium" ||
+        promotion.campaign_status === "requested" ||
+        promotion.payment_status === "pending" && promotion.plan_slug !== "free";
     }).length;
 
     return [
@@ -632,6 +638,13 @@
           if (!savedStall) throw new Error("The stall could not be saved.");
 
           var existingPromotion = promotionFor(savedStall.id);
+          var resolvesUpgrade = Boolean(
+            existingPromotion &&
+            existingPromotion.upgrade_requested_plan === "premium" &&
+            selectedPlan && selectedPlan.slug === "premium" &&
+            stallForm.elements.campaign_status.value === "active" &&
+            stallForm.elements.promotion_payment_status.value === "paid"
+          );
           var savedPromotion = await store.saveStallPromotion({
             stall_id: savedStall.id,
             plan_slug: selectedPlan ? selectedPlan.slug : "free",
@@ -644,7 +657,9 @@
             ends_at: promotionEndsAt,
             payment_reference: stallForm.elements.payment_reference.value.trim(),
             requested_at: existingPromotion && existingPromotion.requested_at,
-            paid_at: existingPromotion && existingPromotion.payment_status === "paid" ? existingPromotion.paid_at : null
+            paid_at: existingPromotion && existingPromotion.payment_status === "paid" ? existingPromotion.paid_at : null,
+            upgrade_requested_plan: resolvesUpgrade ? null : existingPromotion && existingPromotion.upgrade_requested_plan,
+            upgrade_requested_at: resolvesUpgrade ? null : existingPromotion && existingPromotion.upgrade_requested_at
           });
           ui.toast(promotionIsLive(savedPromotion) ? "Stall saved and sponsored placement is live." : "Stall and promotion settings saved.");
           clearStallForm();

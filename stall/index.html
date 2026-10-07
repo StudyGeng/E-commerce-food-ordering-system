@@ -35,23 +35,64 @@
     </div>
   </header>
 
-  <main class="page-shell">
-    <section class="screen-header compact">
+  <main class="page-shell owner-dashboard">
+    <section class="screen-header compact owner-dashboard-section" id="owner-overview" aria-labelledby="owner-overview-heading">
       <div>
         <p class="eyebrow">Stall dashboard</p>
-        <h1>Receive orders, manage food, and grow your stall</h1>
-        <p>Handle incoming orders, update your menu and stock, or request a clearly labeled sponsored placement.</p>
+        <h1 id="owner-overview-heading">Receive orders, manage food, and grow your stall</h1>
+        <p>Handle incoming orders, track business performance, update your menu and stock, or request a clearly labeled sponsored placement.</p>
+        <span class="tag business-access-badge" id="business-access-badge">Checking business tools...</span>
       </div>
     </section>
 
-    <section class="dashboard-grid" id="staff-stats"></section>
+    <nav class="owner-section-nav" aria-label="Stall owner dashboard sections">
+      <a href="#owner-overview"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Overview</span></a>
+      <a href="#owner-orders"><i data-lucide="receipt-text" aria-hidden="true"></i><span>Orders</span></a>
+      <a href="#owner-expenses" data-business-nav><i data-lucide="wallet-cards" aria-hidden="true"></i><span>Expenses</span></a>
+      <a href="#owner-analytics" data-business-nav><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>Analytics</span></a>
+      <a href="#owner-menu"><i data-lucide="utensils" aria-hidden="true"></i><span>Menu</span></a>
+      <a href="#owner-profile"><i data-lucide="store" aria-hidden="true"></i><span>Profile</span></a>
+    </nav>
+
+    <section class="dashboard-grid" id="staff-stats" role="status" aria-live="polite" aria-label="Live stall overview"></section>
+
+    <section class="content-panel business-access-lock hidden" id="business-calculator-lock" aria-labelledby="business-lock-heading">
+      <div class="business-lock-hero">
+        <span class="business-lock-icon" aria-hidden="true"><i data-lucide="lock-keyhole"></i></span>
+        <div>
+          <p class="eyebrow">Paid business tools</p>
+          <h2 id="business-lock-heading">Unlock your stall business calculator</h2>
+          <p>Free stalls keep orders, menu, stock, and profile tools. Upgrade to calculate expenses, revenue, and real profit automatically.</p>
+        </div>
+      </div>
+      <div class="business-tier-grid" id="business-tier-grid">
+        <article class="business-tier-card">
+          <span class="tag">Free</span>
+          <h3>Ordering essentials</h3>
+          <p>Orders, menu, stock, and stall profile. Business calculation is fully locked.</p>
+        </article>
+        <article class="business-tier-card featured">
+          <span class="tag gold">Featured</span>
+          <h3>Business essentials</h3>
+          <p>Expense tracking, revenue, net profit, margin, orders, items sold, average order value, and best seller.</p>
+          <button class="button ghost" type="button" data-request-business-plan="featured">Choose Featured</button>
+        </article>
+        <article class="business-tier-card premium">
+          <span class="tag status-paid">Premium</span>
+          <h3>Full business intelligence</h3>
+          <p>Everything in Featured, plus custom dates, gross-profit detail, charts, and menu-item profitability.</p>
+          <button class="button" type="button" data-request-business-plan="premium">Choose Premium</button>
+        </article>
+      </div>
+      <p class="business-lock-note">Access starts only after the plan is paid, approved, and within its active dates.</p>
+    </section>
 
     <section class="staff-layout">
-      <div class="content-panel">
+      <section class="content-panel owner-dashboard-section" id="owner-orders" aria-labelledby="owner-orders-heading">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Live orders</p>
-            <h2>Incoming order queue</h2>
+            <h2 id="owner-orders-heading">Incoming order queue</h2>
           </div>
           <button class="button ghost" type="button" id="refresh-staff-orders">
             <i data-lucide="refresh-cw"></i>
@@ -59,8 +100,8 @@
           </button>
         </div>
 
-        <div class="order-list" id="staff-orders"></div>
-      </div>
+        <div class="order-list" id="staff-orders" aria-live="polite"></div>
+      </section>
 
       <aside class="right-stack manager-panel">
         <section class="content-panel promotion-request-panel">
@@ -89,11 +130,11 @@
           <p class="promotion-request-note">This is a demo request—no payment is collected here. An admin must confirm payment and activate the dates before customers see the ad.</p>
         </section>
 
-        <section class="content-panel">
+        <section class="content-panel owner-dashboard-section" id="owner-profile" aria-labelledby="owner-profile-heading">
           <div class="section-heading">
             <div>
               <p class="eyebrow">Stall info</p>
-              <h2>Edit stall profile</h2>
+              <h2 id="owner-profile-heading">Edit stall profile</h2>
             </div>
           </div>
 
@@ -130,11 +171,11 @@
           </form>
         </section>
 
-        <section class="content-panel">
+        <section class="content-panel owner-dashboard-section" id="owner-menu" aria-labelledby="owner-menu-heading">
           <div class="section-heading">
             <div>
               <p class="eyebrow">Menu</p>
-              <h2 data-menu-heading>Food, price, and stock</h2>
+              <h2 id="owner-menu-heading" data-menu-heading>Food, price, and stock</h2>
             </div>
             <button class="button ghost" type="button" id="clear-menu-form">
               <i data-lucide="plus"></i>
@@ -156,6 +197,10 @@
             <label>
               <span>Price</span>
               <input type="number" name="price" min="0" step="0.10" required placeholder="8.90">
+            </label>
+            <label class="hidden" data-premium-analytics>
+              <span>Estimated cost (RM) <small class="field-optional">Optional</small></span>
+              <input type="number" name="estimated_cost" min="0" step="0.10" inputmode="decimal" placeholder="4.00">
             </label>
             <label>
               <span>Stock quantity</span>
@@ -179,9 +224,186 @@
             </button>
           </form>
 
-          <div class="mini-list" id="staff-menu-list"></div>
+          <div class="mini-list" id="staff-menu-list" aria-live="polite"></div>
         </section>
       </aside>
+    </section>
+
+    <section class="content-panel owner-dashboard-section hidden" id="owner-expenses" data-business-tools aria-labelledby="owner-expenses-heading">
+      <div class="section-heading owner-section-heading">
+        <div>
+          <p class="eyebrow">Expense management</p>
+          <h2 id="owner-expenses-heading">Record and review business spending</h2>
+          <p>Log day-to-day costs so your profit reports reflect what it really takes to run the stall.</p>
+        </div>
+        <i class="panel-heading-icon" data-lucide="badge-dollar-sign" aria-hidden="true"></i>
+      </div>
+
+      <div class="expense-management-layout">
+        <div class="subpanel expense-entry-panel">
+          <div class="subpanel-heading">
+            <h3 data-expense-heading>Record an expense</h3>
+            <p>Add a new cost or select an existing record to edit it.</p>
+          </div>
+
+          <form id="expense-form" class="stack-form">
+            <input type="hidden" name="id">
+            <label>
+              <span>Expense name</span>
+              <input type="text" name="expense_name" maxlength="120" required autocomplete="off" placeholder="Example: Morning produce order">
+            </label>
+            <label>
+              <span>Category</span>
+              <select name="category" required>
+                <option value="">Choose a category</option>
+                <option value="Ingredients">Ingredients</option>
+                <option value="Packaging">Packaging</option>
+                <option value="Staff">Staff</option>
+                <option value="Rent &amp; Utilities">Rent &amp; Utilities</option>
+                <option value="Transportation">Transportation</option>
+                <option value="Maintenance">Maintenance</option>
+                <option value="Business">Business</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+            <div class="form-grid expense-form-grid">
+              <label>
+                <span>Amount (RM)</span>
+                <input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required placeholder="0.00">
+              </label>
+              <label>
+                <span>Date</span>
+                <input type="date" name="date" required>
+              </label>
+            </div>
+            <label>
+              <span>Description <small class="field-optional">Optional</small></span>
+              <textarea name="description" rows="3" maxlength="500" placeholder="Supplier, receipt, or payment notes"></textarea>
+            </label>
+            <div class="form-actions expense-form-actions">
+              <button class="button ghost" type="button" id="clear-expense-form">
+                <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+                Clear
+              </button>
+              <button class="button" type="submit" id="save-expense-button">
+                <i data-lucide="save" aria-hidden="true"></i>
+                Save expense
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="expense-records-panel">
+          <div id="expense-summary" class="expense-summary" role="status" aria-live="polite" aria-atomic="true">
+            <p class="data-empty-state">Expense totals will appear here once your records load.</p>
+          </div>
+          <div class="table-scroll expense-table-scroll" tabindex="0" role="region" aria-label="Expense records">
+            <div id="expense-list" aria-live="polite">
+              <p class="data-empty-state">No expense records to show yet.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-panel owner-dashboard-section hidden" id="owner-analytics" data-business-tools aria-labelledby="owner-analytics-heading">
+      <div class="section-heading owner-section-heading">
+        <div>
+          <p class="eyebrow">Business analytics</p>
+          <h2 id="owner-analytics-heading">Understand sales, costs, and profit</h2>
+          <p>Compare performance over a quick date range or choose your own reporting period.</p>
+        </div>
+        <i class="panel-heading-icon" data-lucide="chart-spline" aria-hidden="true"></i>
+      </div>
+
+      <div class="analytics-date-controls" id="analytics-date-filter">
+        <div class="date-preset-group" role="group" aria-label="Analytics date presets">
+          <button class="date-preset-button" type="button" data-date-preset="today" aria-pressed="false">Today</button>
+          <button class="date-preset-button" type="button" data-date-preset="yesterday" aria-pressed="false">Yesterday</button>
+          <button class="date-preset-button" type="button" data-date-preset="this-week" aria-pressed="false">This week</button>
+          <button class="date-preset-button" type="button" data-date-preset="this-month" aria-pressed="true">This month</button>
+        </div>
+        <form class="analytics-custom-range hidden" data-premium-analytics aria-label="Custom analytics date range">
+          <label>
+            <span>From</span>
+            <input type="date" id="analytics-date-from" name="date_from">
+          </label>
+          <label>
+            <span>To</span>
+            <input type="date" id="analytics-date-to" name="date_to">
+          </label>
+          <button class="button" type="submit" id="apply-analytics-range">
+            <i data-lucide="calendar-check" aria-hidden="true"></i>
+            Apply
+          </button>
+        </form>
+      </div>
+
+      <div id="business-metrics" class="analytics-metric-grid" role="status" aria-live="polite" aria-label="Business metrics">
+        <p class="data-empty-state">Business metrics will appear here once your data loads.</p>
+      </div>
+
+      <aside class="featured-upgrade-callout hidden" id="premium-analytics-lock" aria-labelledby="premium-analytics-lock-heading">
+        <i data-lucide="sparkles" aria-hidden="true"></i>
+        <div>
+          <p class="eyebrow">Premium advantage</p>
+          <h3 id="premium-analytics-lock-heading">Unlock charts and menu profitability</h3>
+          <p>Upgrade from Featured to Premium for custom reporting periods, gross-profit detail, expense and sales charts, and estimated profit for every menu item.</p>
+        </div>
+        <button class="button" type="button" data-request-business-plan="premium">Request Premium upgrade</button>
+      </aside>
+
+      <div class="analytics-content-grid hidden" data-premium-analytics>
+        <article class="analytics-panel analytics-panel-summary" aria-labelledby="performance-summary-heading">
+          <div class="analytics-panel-heading">
+            <div>
+              <p class="eyebrow">At a glance</p>
+              <h3 id="performance-summary-heading">Performance summary</h3>
+            </div>
+          </div>
+          <div id="performance-summary" class="analytics-summary" aria-live="polite">
+            <p class="data-empty-state">Summary insights will appear for the selected period.</p>
+          </div>
+        </article>
+
+        <article class="analytics-panel analytics-panel-trend" aria-labelledby="sales-trend-heading">
+          <div class="analytics-panel-heading">
+            <div>
+              <p class="eyebrow">Over time</p>
+              <h3 id="sales-trend-heading">Sales and profit trend</h3>
+            </div>
+          </div>
+          <div id="sales-trend-chart" class="analytics-chart" aria-labelledby="sales-trend-heading">
+            <p class="data-empty-state">Trend data will appear after orders or expenses are recorded.</p>
+          </div>
+        </article>
+
+        <article class="analytics-panel analytics-panel-breakdown" aria-labelledby="expense-breakdown-heading">
+          <div class="analytics-panel-heading">
+            <div>
+              <p class="eyebrow">Spending mix</p>
+              <h3 id="expense-breakdown-heading">Expense breakdown</h3>
+            </div>
+          </div>
+          <div id="expense-breakdown-chart" class="analytics-chart" aria-labelledby="expense-breakdown-heading">
+            <p class="data-empty-state">Category totals will appear after expenses are recorded.</p>
+          </div>
+        </article>
+
+        <article class="analytics-panel analytics-panel-menu" aria-labelledby="menu-performance-heading">
+          <div class="analytics-panel-heading">
+            <div>
+              <p class="eyebrow">What sells</p>
+              <h3 id="menu-performance-heading">Menu performance</h3>
+            </div>
+          </div>
+          <div class="table-scroll" tabindex="0" role="region" aria-label="Menu performance results">
+            <div id="menu-performance" aria-live="polite">
+              <p class="data-empty-state">Item-level performance will appear after completed sales.</p>
+            </div>
+          </div>
+        </article>
+      </div>
     </section>
   </main>
 

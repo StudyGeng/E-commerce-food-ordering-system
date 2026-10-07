@@ -63,6 +63,8 @@ create table if not exists public.stall_promotions (
   payment_reference text unique,
   requested_at timestamp with time zone default now(),
   paid_at timestamp with time zone,
+  upgrade_requested_plan text check (upgrade_requested_plan is null or upgrade_requested_plan = 'premium'),
+  upgrade_requested_at timestamp with time zone,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now(),
   constraint stall_promotions_valid_window check (
@@ -109,6 +111,39 @@ create table if not exists public.menu_items (
   updated_at timestamp with time zone default now()
 );
 
+create table if not exists public.menu_item_costs (
+  menu_item_id uuid primary key references public.menu_items(id) on delete cascade,
+  stall_id uuid not null references public.stalls(id) on delete cascade,
+  estimated_cost numeric(10, 2) not null default 0,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  constraint menu_item_costs_estimated_cost_nonnegative check (estimated_cost >= 0)
+);
+
+alter table public.menu_item_costs enable row level security;
+revoke all on public.menu_item_costs from anon, authenticated;
+
+-- Migrate the early calculator prototype if its private cost was stored on the
+-- publicly readable menu table. New installs never create that public column.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'menu_items'
+      and column_name = 'estimated_cost'
+  ) then
+    execute $migration$
+      insert into public.menu_item_costs (menu_item_id, stall_id, estimated_cost)
+      select id, stall_id, greatest(coalesce(estimated_cost, 0), 0)
+      from public.menu_items
+      where stall_id is not null
+      on conflict (menu_item_id) do nothing
+    $migration$;
+    execute 'alter table public.menu_items drop column estimated_cost';
+  end if;
+end $$;
+
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid references public.users(id) on delete set null,
@@ -127,6 +162,7 @@ create table if not exists public.orders (
   auto_cancelled_at timestamp with time zone,
   cancellation_reason text,
   stock_released_at timestamp with time zone,
+  completed_at timestamp with time zone,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
 );
@@ -138,8 +174,23 @@ create table if not exists public.order_items (
   stall_id uuid references public.stalls(id) on delete set null,
   quantity integer not null,
   price numeric(10, 2) not null,
-  notes text
+  notes text,
+  constraint order_items_quantity_positive check (quantity > 0),
+  constraint order_items_price_nonnegative check (price >= 0)
 );
+
+create table if not exists public.order_item_costs (
+  order_item_id uuid primary key references public.order_items(id) on delete cascade,
+  stall_id uuid not null references public.stalls(id) on delete cascade,
+  unit_cost numeric(10, 2) not null default 0,
+  cost_source text not null default 'menu_cost_snapshot'
+    check (cost_source in ('menu_cost_snapshot', 'backfill_estimate')),
+  captured_at timestamp with time zone not null default now(),
+  constraint order_item_costs_unit_cost_nonnegative check (unit_cost >= 0)
+);
+
+alter table public.order_item_costs enable row level security;
+revoke all on public.order_item_costs from anon, authenticated;
 
 create table if not exists public.payments (
   id uuid primary key default gen_random_uuid(),
@@ -153,7 +204,50 @@ create table if not exists public.payments (
   updated_at timestamp with time zone default now()
 );
 
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  stall_id uuid not null references public.stalls(id) on delete cascade,
+  expense_name text not null,
+  category text not null,
+  amount numeric(10, 2) not null,
+  description text default '',
+  expense_date date not null,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now(),
+  constraint expenses_name_not_blank check (btrim(expense_name) <> ''),
+  constraint expenses_category_not_blank check (btrim(category) <> ''),
+  constraint expenses_amount_positive check (amount > 0)
+);
+
+alter table public.expenses enable row level security;
+revoke all on public.expenses from anon, authenticated;
+
 alter table public.users add column if not exists assigned_stall_id uuid;
+alter table public.stall_promotions add column if not exists upgrade_requested_plan text;
+alter table public.stall_promotions add column if not exists upgrade_requested_at timestamp with time zone;
+alter table public.stall_promotions drop constraint if exists stall_promotions_upgrade_requested_plan_check;
+alter table public.stall_promotions add constraint stall_promotions_upgrade_requested_plan_check
+  check (upgrade_requested_plan is null or upgrade_requested_plan = 'premium');
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.order_items'::regclass
+      and conname = 'order_items_quantity_positive'
+  ) then
+    alter table public.order_items add constraint order_items_quantity_positive
+      check (quantity > 0) not valid;
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.order_items'::regclass
+      and conname = 'order_items_price_nonnegative'
+  ) then
+    alter table public.order_items add constraint order_items_price_nonnegative
+      check (price >= 0) not valid;
+  end if;
+end $$;
 
 -- Passwords belong exclusively to Supabase Auth. Remove legacy prototype secrets.
 alter table public.users drop column if exists demo_password;
@@ -165,16 +259,27 @@ alter table public.orders add column if not exists pending_warning_at timestamp 
 alter table public.orders add column if not exists auto_cancelled_at timestamp with time zone;
 alter table public.orders add column if not exists cancellation_reason text;
 alter table public.orders add column if not exists stock_released_at timestamp with time zone;
+alter table public.orders add column if not exists completed_at timestamp with time zone;
+
+update public.orders
+set completed_at = coalesce(completed_at, updated_at, created_at, now())
+where status = 'Completed' and completed_at is null;
 
 alter table public.payments add column if not exists updated_at timestamp with time zone default now();
 
 create index if not exists idx_menu_items_stall_id on public.menu_items(stall_id);
 create index if not exists idx_menu_items_category on public.menu_items(category);
+create index if not exists idx_menu_item_costs_stall_id on public.menu_item_costs(stall_id);
 create index if not exists idx_orders_created_at on public.orders(created_at desc);
 create index if not exists idx_orders_table_code on public.orders(table_code);
 create index if not exists idx_order_items_order_id on public.order_items(order_id);
 create index if not exists idx_order_items_stall_id on public.order_items(stall_id);
+create index if not exists idx_order_item_costs_stall_id on public.order_item_costs(stall_id);
 create index if not exists idx_payments_order_id on public.payments(order_id);
+create index if not exists idx_orders_status_completed_at
+  on public.orders(status, completed_at desc);
+create index if not exists idx_expenses_stall_date
+  on public.expenses(stall_id, expense_date desc);
 create index if not exists idx_stall_promotions_active_window
   on public.stall_promotions(campaign_status, payment_status, starts_at, ends_at);
 
@@ -187,6 +292,116 @@ begin
   return new;
 end;
 $$;
+
+create or replace function public.set_order_completed_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'Completed' then
+    if tg_op = 'INSERT' then
+      new.completed_at = coalesce(new.completed_at, now());
+    elsif old.status is distinct from 'Completed' then
+      new.completed_at = now();
+    else
+      new.completed_at = coalesce(old.completed_at, new.completed_at, now());
+    end if;
+  else
+    new.completed_at = null;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.capture_order_item_cost()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  menu_stall uuid;
+begin
+  if new.menu_item_id is null then
+    return new;
+  end if;
+
+  select mi.stall_id into menu_stall
+  from public.menu_items mi
+  where mi.id = new.menu_item_id;
+
+  if menu_stall is null then
+    raise exception 'Cannot capture cost for an unknown menu item.';
+  end if;
+  if new.stall_id is distinct from menu_stall then
+    raise exception 'Order item stall does not match its menu item.';
+  end if;
+
+  insert into public.order_item_costs (order_item_id, stall_id, unit_cost, cost_source)
+  values (
+    new.id,
+    menu_stall,
+    coalesce((
+      select mic.estimated_cost
+      from public.menu_item_costs mic
+      where mic.menu_item_id = new.menu_item_id and mic.stall_id = menu_stall
+    ), 0),
+    'menu_cost_snapshot'
+  )
+  on conflict (order_item_id) do nothing;
+  return new;
+end;
+$$;
+
+revoke all on function public.capture_order_item_cost() from public;
+
+create or replace function public.validate_order_item_input()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  menu_stall uuid;
+  menu_price numeric(10, 2);
+  menu_available boolean;
+  menu_stock integer;
+  parent_status text;
+begin
+  if new.order_id is null or new.menu_item_id is null then
+    raise exception 'Order and menu item are required.';
+  end if;
+  if new.quantity is null or new.quantity <= 0 then
+    raise exception 'Order item quantity must be greater than zero.';
+  end if;
+
+  select mi.stall_id, mi.price, mi.available, mi.stock_quantity
+  into menu_stall, menu_price, menu_available, menu_stock
+  from public.menu_items mi
+  where mi.id = new.menu_item_id;
+  if not found then
+    raise exception 'The selected menu item does not exist.';
+  end if;
+  if new.stall_id is distinct from menu_stall then
+    raise exception 'Order item stall does not match its menu item.';
+  end if;
+  if not coalesce(menu_available, false) or coalesce(menu_stock, 0) < new.quantity then
+    raise exception 'The selected quantity is not available.';
+  end if;
+
+  select o.status into parent_status
+  from public.orders o
+  where o.id = new.order_id;
+  if not found or parent_status <> 'Pending' then
+    raise exception 'Items can only be added to a pending order.';
+  end if;
+
+  new.price := menu_price;
+  return new;
+end;
+$$;
+
+revoke all on function public.validate_order_item_input() from public;
 
 drop trigger if exists set_users_updated_at on public.users;
 create trigger set_users_updated_at
@@ -218,22 +433,47 @@ create trigger set_menu_items_updated_at
   before update on public.menu_items
   for each row execute function public.set_updated_at();
 
+drop trigger if exists set_menu_item_costs_updated_at on public.menu_item_costs;
+create trigger set_menu_item_costs_updated_at
+  before update on public.menu_item_costs
+  for each row execute function public.set_updated_at();
+
 drop trigger if exists set_orders_updated_at on public.orders;
 create trigger set_orders_updated_at
   before update on public.orders
   for each row execute function public.set_updated_at();
+
+drop trigger if exists set_order_completed_at on public.orders;
+create trigger set_order_completed_at
+  before insert or update on public.orders
+  for each row execute function public.set_order_completed_at();
+
+drop trigger if exists capture_order_item_cost on public.order_items;
+create trigger capture_order_item_cost
+  after insert on public.order_items
+  for each row execute function public.capture_order_item_cost();
+
+drop trigger if exists validate_order_item_input on public.order_items;
+create trigger validate_order_item_input
+  before insert on public.order_items
+  for each row execute function public.validate_order_item_input();
 
 drop trigger if exists set_payments_updated_at on public.payments;
 create trigger set_payments_updated_at
   before update on public.payments
   for each row execute function public.set_updated_at();
 
+drop trigger if exists set_expenses_updated_at on public.expenses;
+create trigger set_expenses_updated_at
+  before update on public.expenses
+  for each row execute function public.set_updated_at();
+
 insert into public.promotion_plans
   (slug, name, description, price_minor, currency, placement_priority, active)
 values
-  ('free', 'Free', 'Standard organic listing in the food court.', 0, 'MYR', 0, true),
-  ('featured', 'Featured', 'Sponsored discovery placement above organic popular stalls.', 3900, 'MYR', 10, true),
-  ('premium', 'Premium', 'Highest-priority sponsored placement with a premium highlight.', 7900, 'MYR', 20, true)
+  ('free', 'Free', 'Ordering, menu, stock, and profile tools without business calculation.', 0, 'MYR', 0, true),
+  ('featured', 'Featured', 'Sponsored discovery plus essential expense and profit calculation.', 3900, 'MYR', 10, true),
+  ('premium', 'Premium', 'Highest-priority placement plus complete charts and menu profitability.', 7900, 'MYR', 20, true)
 on conflict (slug) do update set
   name = excluded.name,
   description = excluded.description,
@@ -302,6 +542,29 @@ on conflict (id) do update set
   available = excluded.available,
   stock_quantity = excluded.stock_quantity;
 
+insert into public.menu_item_costs (menu_item_id, stall_id, estimated_cost)
+values
+  ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 3.20),
+  ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 4.10),
+  ('20000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 3.60),
+  ('20000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000002', 3.50),
+  ('20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000002', 2.80),
+  ('20000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000002', 3.80),
+  ('20000000-0000-4000-8000-000000000007', '10000000-0000-4000-8000-000000000003', 5.20),
+  ('20000000-0000-4000-8000-000000000008', '10000000-0000-4000-8000-000000000003', 4.20),
+  ('20000000-0000-4000-8000-000000000009', '10000000-0000-4000-8000-000000000003', 4.00),
+  ('20000000-0000-4000-8000-000000000010', '10000000-0000-4000-8000-000000000004', 0.80),
+  ('20000000-0000-4000-8000-000000000011', '10000000-0000-4000-8000-000000000004', 1.80),
+  ('20000000-0000-4000-8000-000000000012', '10000000-0000-4000-8000-000000000004', 2.50)
+on conflict (menu_item_id) do nothing;
+
+insert into public.order_item_costs (order_item_id, stall_id, unit_cost, cost_source)
+select oi.id, oi.stall_id, coalesce(mic.estimated_cost, 0), 'backfill_estimate'
+from public.order_items oi
+left join public.menu_item_costs mic on mic.menu_item_id = oi.menu_item_id and mic.stall_id = oi.stall_id
+where oi.stall_id is not null
+on conflict (order_item_id) do nothing;
+
 insert into public.tables (id, code, label, seats, active)
 values
   ('30000000-0000-4000-8000-000000000001', 'T01', 'Table 1', 2, true),
@@ -323,20 +586,30 @@ alter table public.promotion_plans enable row level security;
 alter table public.stall_promotions enable row level security;
 alter table public.stall_popularity_metrics enable row level security;
 alter table public.menu_items enable row level security;
+alter table public.menu_item_costs enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
+alter table public.order_item_costs enable row level security;
 alter table public.payments enable row level security;
+alter table public.expenses enable row level security;
+
+-- These financial-cost tables are new and private; public menu access does not
+-- include them.
+revoke all on public.menu_item_costs, public.order_item_costs from anon, authenticated;
+grant select, insert, update, delete on public.menu_item_costs to authenticated;
+grant select on public.order_item_costs to authenticated;
 
 revoke all on public.users, public.tables, public.stalls, public.promotion_plans,
   public.stall_promotions, public.stall_popularity_metrics, public.menu_items,
-  public.orders, public.order_items, public.payments from anon, authenticated;
+  public.orders, public.order_items, public.payments, public.expenses from anon, authenticated;
 
 grant select on public.tables, public.stalls, public.menu_items, public.promotion_plans to anon, authenticated;
 grant insert, update, delete on public.promotion_plans to authenticated;
 grant insert on public.orders, public.order_items, public.payments to anon, authenticated;
 grant select on public.orders, public.order_items, public.payments to anon, authenticated;
 grant select, insert, update, delete on public.users, public.tables, public.stalls,
-  public.stall_promotions, public.stall_popularity_metrics, public.menu_items to authenticated;
+  public.stall_promotions, public.stall_popularity_metrics, public.menu_items,
+  public.expenses to authenticated;
 grant update (status, payment_status, pending_warning_at, auto_cancelled_at,
   cancellation_reason, stock_released_at, updated_at) on public.orders to authenticated;
 grant update (status, updated_at) on public.payments to authenticated;
@@ -364,9 +637,147 @@ as $$
   select assigned_stall_id from public.users where id = auth.uid() and role = 'staff';
 $$;
 
+create or replace function public.has_business_analytics(target_stall uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.stall_promotions sp
+    join public.promotion_plans pp on pp.slug = sp.plan_slug and pp.active = true
+    where sp.stall_id = target_stall
+      and sp.plan_slug in ('featured', 'premium')
+      and sp.campaign_status = 'active'
+      and sp.payment_status = 'paid'
+      and sp.starts_at is not null
+      and sp.ends_at is not null
+      and sp.starts_at <= now()
+      and sp.ends_at > now()
+  );
+$$;
+
+create or replace function public.has_premium_analytics(target_stall uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.stall_promotions sp
+    join public.promotion_plans pp on pp.slug = sp.plan_slug and pp.active = true
+    where sp.stall_id = target_stall
+      and sp.plan_slug = 'premium'
+      and sp.campaign_status = 'active'
+      and sp.payment_status = 'paid'
+      and sp.starts_at is not null
+      and sp.ends_at is not null
+      and sp.starts_at <= now()
+      and sp.ends_at > now()
+  );
+$$;
+
+create or replace function public.save_premium_menu_item(
+  requested_item_id uuid,
+  requested_stall_id uuid,
+  requested_name text,
+  requested_description text,
+  requested_price numeric,
+  requested_image_url text,
+  requested_category text,
+  requested_available boolean,
+  requested_stock_quantity integer,
+  requested_estimated_cost numeric
+)
+returns public.menu_items
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_id uuid := coalesce(requested_item_id, gen_random_uuid());
+  existing_stall uuid;
+  saved_item public.menu_items%rowtype;
+  admin_user boolean := public.is_admin();
+begin
+  if requested_stall_id is null then
+    raise exception 'Choose a stall for this menu item.';
+  end if;
+  if not admin_user and (
+    requested_stall_id is distinct from public.assigned_stall() or
+    not public.has_premium_analytics(requested_stall_id)
+  ) then
+    raise exception 'An active Premium plan is required for private menu costing.';
+  end if;
+  if requested_name is null or btrim(requested_name) = '' then
+    raise exception 'Enter a food name.';
+  end if;
+  if requested_category is null or btrim(requested_category) = '' then
+    raise exception 'Enter a menu category.';
+  end if;
+  if requested_price is null or requested_price < 0 then
+    raise exception 'Menu price cannot be negative.';
+  end if;
+  if requested_stock_quantity is null or requested_stock_quantity < 0 then
+    raise exception 'Stock quantity cannot be negative.';
+  end if;
+  if requested_estimated_cost is null or requested_estimated_cost < 0 then
+    raise exception 'Estimated cost cannot be negative.';
+  end if;
+
+  select mi.stall_id into existing_stall
+  from public.menu_items mi
+  where mi.id = target_id;
+
+  if found then
+    if not admin_user and existing_stall is distinct from requested_stall_id then
+      raise exception 'You can only update menu items for your assigned stall.';
+    end if;
+    update public.menu_items
+    set stall_id = requested_stall_id,
+        name = requested_name,
+        description = coalesce(requested_description, ''),
+        price = requested_price,
+        image_url = coalesce(requested_image_url, ''),
+        category = requested_category,
+        available = coalesce(requested_available, false),
+        stock_quantity = requested_stock_quantity,
+        updated_at = now()
+    where id = target_id
+    returning * into saved_item;
+  else
+    insert into public.menu_items
+      (id, stall_id, name, description, price, image_url, category, available, stock_quantity)
+    values
+      (target_id, requested_stall_id, requested_name, coalesce(requested_description, ''),
+       requested_price, coalesce(requested_image_url, ''), requested_category,
+       coalesce(requested_available, false), requested_stock_quantity)
+    returning * into saved_item;
+  end if;
+
+  insert into public.menu_item_costs (menu_item_id, stall_id, estimated_cost)
+  values (target_id, requested_stall_id, requested_estimated_cost)
+  on conflict (menu_item_id) do update set
+    stall_id = excluded.stall_id,
+    estimated_cost = excluded.estimated_cost,
+    updated_at = now();
+
+  return saved_item;
+end;
+$$;
+
 revoke all on function public.is_admin() from public;
 revoke all on function public.assigned_stall() from public;
-grant execute on function public.is_admin(), public.assigned_stall() to authenticated;
+revoke all on function public.has_business_analytics(uuid) from public;
+revoke all on function public.has_premium_analytics(uuid) from public;
+revoke all on function public.save_premium_menu_item(uuid, uuid, text, text, numeric, text, text, boolean, integer, numeric) from public;
+grant execute on function public.is_admin(), public.assigned_stall(),
+  public.has_business_analytics(uuid), public.has_premium_analytics(uuid) to authenticated;
+grant execute on function public.save_premium_menu_item(uuid, uuid, text, text, numeric, text, text, boolean, integer, numeric) to authenticated;
 
 create or replace function public.request_stall_promotion(
   requested_plan text,
@@ -426,7 +837,49 @@ begin
     payment_reference = null,
     requested_at = now(),
     paid_at = null,
+    upgrade_requested_plan = null,
+    upgrade_requested_at = null,
     updated_at = now();
+end;
+$$;
+
+create or replace function public.request_stall_upgrade(requested_plan text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_stall uuid := public.assigned_stall();
+begin
+  if target_stall is null then
+    raise exception 'No stall is assigned to this account.';
+  end if;
+  if requested_plan <> 'premium' or not exists (
+    select 1 from public.promotion_plans where slug = 'premium' and active = true
+  ) then
+    raise exception 'The Premium plan is not available.';
+  end if;
+  if not exists (
+    select 1
+    from public.stall_promotions sp
+    join public.promotion_plans pp on pp.slug = sp.plan_slug and pp.active = true
+    where sp.stall_id = target_stall
+      and sp.plan_slug = 'featured'
+      and sp.campaign_status = 'active'
+      and sp.payment_status = 'paid'
+      and sp.starts_at is not null
+      and sp.starts_at <= now()
+      and sp.ends_at > now()
+  ) then
+    raise exception 'Only an active Featured plan can request this upgrade.';
+  end if;
+
+  update public.stall_promotions
+  set upgrade_requested_plan = 'premium',
+      upgrade_requested_at = now(),
+      updated_at = now()
+  where stall_id = target_stall;
 end;
 $$;
 
@@ -478,8 +931,10 @@ as $$
 $$;
 
 revoke all on function public.request_stall_promotion(text, text) from public;
+revoke all on function public.request_stall_upgrade(text) from public;
 revoke all on function public.get_stall_discovery() from public;
 grant execute on function public.request_stall_promotion(text, text) to authenticated;
+grant execute on function public.request_stall_upgrade(text) to authenticated;
 grant execute on function public.get_stall_discovery() to anon, authenticated;
 
 drop policy if exists "Prototype public access" on public.users;
@@ -494,6 +949,7 @@ drop policy if exists "Prototype public access" on public.menu_items;
 drop policy if exists "Prototype public access" on public.orders;
 drop policy if exists "Prototype public access" on public.order_items;
 drop policy if exists "Prototype public access" on public.payments;
+drop policy if exists "Prototype public access" on public.expenses;
 
 drop policy if exists "Users read own or admin" on public.users;
 drop policy if exists "Admins create users" on public.users;
@@ -508,6 +964,11 @@ drop policy if exists "Public reads menu" on public.menu_items;
 drop policy if exists "Assigned staff create menu" on public.menu_items;
 drop policy if exists "Assigned staff update menu" on public.menu_items;
 drop policy if exists "Assigned staff delete menu" on public.menu_items;
+drop policy if exists "Premium staff read menu costs" on public.menu_item_costs;
+drop policy if exists "Premium staff create menu costs" on public.menu_item_costs;
+drop policy if exists "Premium staff update menu costs" on public.menu_item_costs;
+drop policy if exists "Premium staff delete menu costs" on public.menu_item_costs;
+drop policy if exists "Premium staff read order costs" on public.order_item_costs;
 drop policy if exists "Customers create orders" on public.orders;
 drop policy if exists "Order tracking reads orders" on public.orders;
 drop policy if exists "Assigned staff update orders" on public.orders;
@@ -516,6 +977,10 @@ drop policy if exists "Order tracking reads order items" on public.order_items;
 drop policy if exists "Customers create payments" on public.payments;
 drop policy if exists "Order tracking reads payments" on public.payments;
 drop policy if exists "Assigned staff update payments" on public.payments;
+drop policy if exists "Assigned staff read expenses" on public.expenses;
+drop policy if exists "Assigned staff create expenses" on public.expenses;
+drop policy if exists "Assigned staff update expenses" on public.expenses;
+drop policy if exists "Assigned staff delete expenses" on public.expenses;
 
 create policy "Users read own or admin" on public.users for select to authenticated
 using (id = auth.uid() or public.is_admin());
@@ -556,6 +1021,78 @@ using (public.is_admin() or stall_id = public.assigned_stall())
 with check (public.is_admin() or stall_id = public.assigned_stall());
 create policy "Assigned staff delete menu" on public.menu_items for delete to authenticated
 using (public.is_admin() or stall_id = public.assigned_stall());
+
+create policy "Premium staff read menu costs" on public.menu_item_costs for select to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_premium_analytics(stall_id))
+);
+create policy "Premium staff create menu costs" on public.menu_item_costs for insert to authenticated
+with check (
+  public.is_admin() or
+  (
+    stall_id = public.assigned_stall()
+    and public.has_premium_analytics(stall_id)
+    and exists (
+      select 1 from public.menu_items mi
+      where mi.id = menu_item_costs.menu_item_id
+        and mi.stall_id = menu_item_costs.stall_id
+    )
+  )
+);
+create policy "Premium staff update menu costs" on public.menu_item_costs for update to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_premium_analytics(stall_id))
+)
+with check (
+  public.is_admin() or
+  (
+    stall_id = public.assigned_stall()
+    and public.has_premium_analytics(stall_id)
+    and exists (
+      select 1 from public.menu_items mi
+      where mi.id = menu_item_costs.menu_item_id
+        and mi.stall_id = menu_item_costs.stall_id
+    )
+  )
+);
+create policy "Premium staff delete menu costs" on public.menu_item_costs for delete to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_premium_analytics(stall_id))
+);
+
+create policy "Premium staff read order costs" on public.order_item_costs for select to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_premium_analytics(stall_id))
+);
+
+create policy "Assigned staff read expenses" on public.expenses for select to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_business_analytics(stall_id))
+);
+create policy "Assigned staff create expenses" on public.expenses for insert to authenticated
+with check (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_business_analytics(stall_id))
+);
+create policy "Assigned staff update expenses" on public.expenses for update to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_business_analytics(stall_id))
+)
+with check (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_business_analytics(stall_id))
+);
+create policy "Assigned staff delete expenses" on public.expenses for delete to authenticated
+using (
+  public.is_admin() or
+  (stall_id = public.assigned_stall() and public.has_business_analytics(stall_id))
+);
 
 create policy "Customers create orders" on public.orders for insert to anon, authenticated
 with check (status = 'Pending' and payment_status in ('Pending', 'Paid') and total_amount >= 0);
